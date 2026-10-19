@@ -1,15 +1,2 @@
-{
-  "name": "مصنع الملابس - نظام الإدارة",
-  "short_name": "مصنع الملابس",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0f172a",
-  "icons": [
-    {
-      "src": "https://cdn-icons-png.flaticon.com/512/2942/2942076.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    }
-  ]
-}
+{"name":"نظام المصنع","short_name":"المصنع","lang":"ar","dir":"rtl","start_url":"./index.html","scope":"./","display":"standalone","background_color":"#ffffff","theme_color":"#1f3a5f",
+"icons":[{"src":"icons/icon-192.png","sizes":"192x192","type":"image/png"},{"src":"icons/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}]}
