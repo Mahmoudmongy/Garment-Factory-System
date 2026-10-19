@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>فحص الاتصال بـ Supabase</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:15px "Times New Roman",serif;max-width:720px;margin:20px auto;padding:0 12px}input,button{font:inherit;padding:8px;margin:3px}pre{background:#f4f4f4;padding:8px;white-space:pre-wrap}.ok{color:#1e8449}.er{color:#c0392b}</style></head>
+<body>
+<h3>فحص الاتصال (Foundation)</h3>
+<p>افتحه محلياً. اكتب بيانات مشروعك هنا <b>(الـ anon key فقط — ممنوع تكتب service role key)</b>. مفيش حاجة بتتخزّن.</p>
+<input id="u" placeholder="https://xxxx.supabase.co" style="width:95%"><br>
+<input id="k" placeholder="anon public key" style="width:95%"><br>
+<input id="n" placeholder="username"><input id="p" type="password" placeholder="password"><br>
+<button onclick="go()">اختبر</button>
+<pre id="o"></pre>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const out=m=>document.getElementById('o').textContent+=m+'\n';
+async function go(){
+  document.getElementById('o').textContent='';
+  const url=u.value.trim(),key=k.value.trim();
+  if(key.split('.').length===3){try{const r=JSON.parse(atob(key.split('.')[1]));if(r.role==='service_role'){out('✗ ده service_role key — اقفل الصفحة وما تستخدمهوش هنا.');return}}catch(e){}}
+  const c=supabase.createClient(url,key,{auth:{persistSession:false}});
+  let r=await c.rpc('rpc_my_permissions');
+  out(r.error?'✓ بدون دخول: الـRPC اترفض ('+r.error.code+') — ده المتوقع':'✗ بدون دخول: الـRPC اشتغل!! (مشكلة أمان)');
+  r=await c.from('customers').select('id').limit(1);
+  out(r.error?'✓ بدون دخول: قراءة الجداول مرفوضة ('+r.error.code+')':'✗ بدون دخول: قراءة الجداول اشتغلت!! (مشكلة أمان)');
+  const l=await c.auth.signInWithPassword({email:n.value.trim().toLowerCase()+'@factory.internal',password:p.value});
+  if(l.error){out('✗ تسجيل الدخول فشل: '+l.error.message);return}
+  out('✓ تسجيل الدخول نجح');
+  r=await c.rpc('rpc_my_permissions');
+  out(r.error?'✗ '+r.error.message:'✓ الصلاحيات ('+r.data.length+'): '+r.data.slice(0,8).join(', ')+(r.data.length>8?' ...':''));
+  r=await c.from('customers').insert({name:'x',op_letter:'Z'});
+  out(r.error?'✓ إدخال مباشر في الجدول مرفوض ('+r.error.code+')':'✗ إدخال مباشر اشتغل!! (مشكلة أمان)');
+  await c.auth.signOut();out('تم تسجيل الخروج');
+}
+</script></body></html>
