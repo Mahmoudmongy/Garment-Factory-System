@@ -1,16 +1,10 @@
 'use client'
-import { useEffect } from 'react'
-
-export default function Page() {
-  useEffect(() => {
-    window.location.href = '/factory-demo.html'
-  }, [])
+export default function Page(){
   return (
-    <main style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'Tahoma',background:'#f4f5f7'}}>
-      <div style={{textAlign:'center'}}>
-        <div style={{fontSize:40}}>🧵</div>
-        <p>جاري تحميل نظام المصنع Demo...</p>
-      </div>
-    </main>
+    <iframe 
+      src="/factory-demo.html" 
+      style={{width:'100vw',height:'100vh',border:'none'}}
+      title="Factory Demo"
+    />
   )
 }
