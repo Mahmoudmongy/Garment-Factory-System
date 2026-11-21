@@ -155,8 +155,12 @@ jobs:
             --branch ${{ github.head_ref || github.ref_name }}
             --commit-dirty=true
 
+      # A freshly published deployment answers 522 for a few seconds while the
+      # route propagates to the edge. smoke_test.py retries those transient
+      # statuses, so a healthy deploy is no longer reported as a failure.
       - name: Verify the deployment
         if: steps.access.outputs.can_deploy == 'true'
+        timeout-minutes: 10
         run: |
           python3 tools/smoke_test.py "${{ steps.deploy.outputs.deployment-url }}"
 
