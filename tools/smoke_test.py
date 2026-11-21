@@ -22,9 +22,15 @@ import urllib.request
 
 TIMEOUT = 20
 
+# Cloudflare بيحجب User-Agent بتاع Python (بيرجع 403)، فالفحص بيبان فاشل
+# والموقع سليم. الهيدر ده بيخلّي الطلب يبان زي متصفح عادي.
+UA = "Mozilla/5.0 (compatible; garment-factory-smoke-test/1.0)"
+
 
 def get(url, headers=None):
-    req = urllib.request.Request(url, headers=headers or {})
+    hdrs = {"User-Agent": UA}
+    hdrs.update(headers or {})
+    req = urllib.request.Request(url, headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
             return res.status, res.read().decode("utf-8", "replace")
@@ -36,7 +42,7 @@ def get(url, headers=None):
 
 def post(url, payload, headers=None):
     data = json.dumps(payload).encode()
-    hdrs = {"Content-Type": "application/json"}
+    hdrs = {"Content-Type": "application/json", "User-Agent": UA}
     hdrs.update(headers or {})
     req = urllib.request.Request(url, data=data, method="POST", headers=hdrs)
     try:
