@@ -4,7 +4,7 @@
 -- المرجع فيه زر «مرتجع للعميل» في المخزن، فبنضيف الدالة اللي بتخدمه.
 -- ============================================================================
 
-insert into public.permissions (code, group_ar, label_ar, sort_order)
+insert into public.permissions (code, group_ar, name_ar, sort_order)
 values ('production.fabric.return', 'المخزن', 'مرتجع قماش للعميل', 74)
 on conflict (code) do nothing;
 
