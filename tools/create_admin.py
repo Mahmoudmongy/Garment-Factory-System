@@ -67,6 +67,18 @@ def sign_in(url, key, email, password):
                {"email": email, "password": password})
 
 
+def rest(url, key, token, path):
+    req = urllib.request.Request(
+        url.rstrip("/") + "/rest/v1/" + path,
+        headers={"apikey": key, "Authorization": "Bearer " + token},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            return res.status, json.loads(res.read().decode() or "[]")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode()[:300]
+
+
 def candidate_urls():
     explicit = (os.environ.get("SUPABASE_DB_URL") or "").strip()
     if explicit.startswith(("postgres://", "postgresql://")):
@@ -135,6 +147,7 @@ def main():
 
     url = os.environ.get("SUPABASE_URL")
     service = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    key = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or service
     password = os.environ.get("ADMIN_PASSWORD")
     for name, val in (("SUPABASE_URL", url), ("SUPABASE_SERVICE_ROLE_KEY", service),
                       ("ADMIN_PASSWORD", password)):
@@ -165,10 +178,27 @@ def main():
             )
     print(f"profile ready: username={username} superuser=true")
 
-    status, body = sign_in(url, service, email, password)
+    status, body = sign_in(url, key, email, password)
     if status != 200:
         sys.exit(f"login check failed [{status}]: {body}")
     print("login verified against the live auth endpoint")
+
+    # A working password is not enough: confirm the session can actually read its
+    # own profile as an active superuser, which is what every screen gates on.
+    token = body["access_token"]
+    status, rows = rest(
+        url, key, token,
+        "profiles?select=username,is_superuser,is_active&id=eq." + user_id,
+    )
+    if status != 200:
+        sys.exit(f"the new session cannot read its own profile [{status}]: {rows}")
+    if not rows:
+        sys.exit("the new session reads no profile row — check the RLS policies")
+    row = rows[0]
+    if not (row.get("is_superuser") and row.get("is_active")):
+        sys.exit(f"profile is not an active superuser: {row}")
+    print(f"permissions verified: username={row['username']} superuser={row['is_superuser']}")
+
     print(f"\nlog in with username '{username}' and the password you set.")
 
 
