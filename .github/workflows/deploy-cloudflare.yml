@@ -104,6 +104,16 @@ jobs:
               print("pages projects: DENIED —", projects.get("status"), projects.get("body"))
           PY
 
+      # A green run that published nothing is worse than a red one, so this
+      # fails when a token exists but cannot reach Pages.
+      - name: Fail when the token cannot publish
+        if: steps.creds.outputs.ready == 'true' && steps.access.outputs.can_deploy != 'true'
+        run: |
+          echo "::error::CLOUDFLARE_API_TOKEN verifies but cannot reach Cloudflare Pages."
+          echo "It lists no accounts, so it carries no account-level permission."
+          echo "Create a token with Account -> Cloudflare Pages -> Edit and replace the secret."
+          exit 1
+
       - name: Ensure the Pages project exists
         if: steps.creds.outputs.ready == 'true'
         continue-on-error: true
