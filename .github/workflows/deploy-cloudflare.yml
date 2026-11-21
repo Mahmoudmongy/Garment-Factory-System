@@ -68,6 +68,7 @@ jobs:
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Inspect Cloudflare access
+        id: access
         if: steps.creds.outputs.ready == 'true'
         continue-on-error: true
         env:
@@ -100,12 +101,34 @@ jobs:
           if projects.get("success"):
               names = [p["name"] for p in (projects.get("result") or [])]
               print("pages projects:", names or "(none)")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("can_deploy=true\n")
           else:
               print("pages projects: DENIED —", projects.get("status"), projects.get("body"))
+              accounts = get("/accounts")
+              if accounts.get("success") and not accounts.get("result"):
+                  print(
+                      "The token verifies but cannot list accounts, so it carries no "
+                      "account-level permission. Create a token with "
+                      "Account > Cloudflare Pages > Edit and replace "
+                      "CLOUDFLARE_API_TOKEN."
+                  )
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("can_deploy=false\n")
           PY
 
+      # A green run that published nothing is worse than a red one, so this
+      # fails when a token exists but cannot reach Pages.
+      - name: Fail when the token cannot publish
+        if: steps.creds.outputs.ready == 'true' && steps.access.outputs.can_deploy != 'true'
+        run: |
+          echo "::error::CLOUDFLARE_API_TOKEN verifies but cannot reach Cloudflare Pages."
+          echo "It lists no accounts, so it carries no account-level permission."
+          echo "Create a token with Account -> Cloudflare Pages -> Edit and replace the secret."
+          exit 1
+
       - name: Ensure the Pages project exists
-        if: steps.creds.outputs.ready == 'true'
+        if: steps.access.outputs.can_deploy == 'true'
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -121,7 +144,7 @@ jobs:
 
       - name: Deploy
         id: deploy
-        if: steps.creds.outputs.ready == 'true'
+        if: steps.access.outputs.can_deploy == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -133,7 +156,7 @@ jobs:
             --commit-dirty=true
 
       - name: Verify the deployment
-        if: steps.creds.outputs.ready == 'true'
+        if: steps.access.outputs.can_deploy == 'true'
         run: |
           python3 tools/smoke_test.py "${{ steps.deploy.outputs.deployment-url }}"
 
@@ -144,14 +167,19 @@ jobs:
             echo ""
             echo "Static checks passed."
             echo ""
-            if [ "${{ steps.creds.outputs.ready }}" = "true" ]; then
+            if [ "${{ steps.access.outputs.can_deploy }}" = "true" ]; then
               echo "### Deployed"
               echo ""
               echo "${{ steps.deploy.outputs.deployment-url }}"
+            elif [ "${{ steps.creds.outputs.ready }}" = "true" ]; then
+              echo "### Not published"
+              echo ""
+              echo "The token verifies but cannot reach Cloudflare Pages. Create a token"
+              echo "with Account -> Cloudflare Pages -> Edit and replace the"
+              echo "CLOUDFLARE_API_TOKEN secret."
             else
               echo "### Deploy skipped"
               echo ""
-              echo "Add \`CLOUDFLARE_API_TOKEN\` and \`CLOUDFLARE_ACCOUNT_ID\` to the"
-              echo "repository secrets to publish from CI."
+              echo "Add \`CLOUDFLARE_API_TOKEN\` to the repository secrets to publish from CI."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

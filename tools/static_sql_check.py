@@ -40,7 +40,41 @@ migrations = "".join(open(f, encoding="utf8").read() for f in files if "migratio
 codes = set(re.findall(r"fn_raise\('(E_[A-Z_]+)'", migrations))
 for c in set(re.findall(r"'(E_[A-Z_]+)", tests)):
     if c not in codes: errors.append(f"test expects error code {c} that no migration raises")
-print(f"files checked: {len(files)} | functions created: {len(created)} | error codes raised: {len(codes)}")
+
+# Column names in `insert into public.<t> (...)` are checked against the columns
+# the migrations declare for that table. A typo here only surfaces at runtime,
+# and by then it has already failed against the real database.
+columns = {}
+for f in sorted(glob.glob(str(root / "supabase/migrations/*.sql"))):
+    raw = open(f, encoding="utf8").read()
+    for m in re.finditer(r"create table (?:if not exists )?public\.(\w+)\s*\((.*?)\n\);", raw, re.S):
+        table, body = m.group(1), m.group(2)
+        cols = set(columns.get(table, set()))
+        for line in body.splitlines():
+            line = line.strip().rstrip(",")
+            if not line or line.startswith(("--", "constraint", "primary", "unique", "check", "foreign")):
+                continue
+            cols.add(line.split()[0])
+        columns[table] = cols
+    for m in re.finditer(r"alter table (?:if exists )?public\.(\w+)\s+add column (?:if not exists )?(\w+)", raw, re.I):
+        columns.setdefault(m.group(1), set()).add(m.group(2))
+
+for f in sorted(glob.glob(str(root / "supabase/migrations/*.sql"))):
+    name = pathlib.Path(f).name
+    raw = open(f, encoding="utf8").read()
+    for m in re.finditer(r"insert into public\.(\w+)\s*\(([^)]*)\)", raw, re.I):
+        table, cols = m.group(1), [c.strip() for c in m.group(2).split(",")]
+        known = columns.get(table)
+        if not known:
+            continue
+        for c in cols:
+            if c and c not in known:
+                errors.append(
+                    f"{name}: insert into {table} names column '{c}', "
+                    f"but the table declares {sorted(known)}"
+                )
+
+print(f"files checked: {len(files)} | functions created: {len(created)} | error codes raised: {len(codes)} | tables: {len(columns)}")
 print("STATIC CHECK:", "FAILED" if errors else "no problems found (this proves nothing about runtime behaviour)")
 for e in errors: print(" -", e)
 sys.exit(1 if errors else 0)
