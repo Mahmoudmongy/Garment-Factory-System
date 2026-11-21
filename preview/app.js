@@ -1389,9 +1389,7 @@ async function pageTemplates() {
   renderTemplateEditor(active.t, active.stages, list);
 }
 
-/* One card per stage, each with its own order arrows and its dependencies as
-   tick boxes. Dependencies are picked from the stages already entered, so a code
-   is never typed by hand and can never point at a stage that does not exist. */
+/* كل مرحلة ليها كارت وأزرار ترتيب، والاعتماديات بتتحدد من المراحل الموجودة بدل كتابة الأكواد يدوي. */
 function renderTemplateEditor(tpl, stages, allTemplates) {
   const box = $('#tplBody') || app;
   const rows = stages.length
@@ -1502,8 +1500,7 @@ function stageCard(r, i, rows) {
   const earlierCodes = new Set(earlier.map((x) => x.code));
   const orphans = picked
     .filter((c) => !earlierCodes.has(c))
-    .map((c) => rows.find((x) => x.code === c))
-    .filter(Boolean);
+    .map((c) => rows.find((x) => x.code === c) || { code: c, name_ar: c });
   const before = earlier.concat(orphans);
   const deps = before.length
     ? `<div class="grid g4" style="margin-top:10px;align-items:end">
@@ -1542,8 +1539,7 @@ function stageCard(r, i, rows) {
   </div>`;
 }
 
-/* The save RPC replaces every stage of an existing template, so renaming has to
-   send the current stages back or they would be deleted. */
+/* الحفظ بيستبدل كل مراحل القالب، فلازم تغيير الاسم يبعت المراحل الحالية عشان ما تتمسحش. */
 async function renameTemplate(tpl) {
   const v = await formDialog('تغيير اسم القالب', [
     { key: 'name_ar', label: 'اسم القالب', value: tpl.name_ar, required: true },
