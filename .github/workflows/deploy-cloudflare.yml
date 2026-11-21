@@ -1,0 +1,157 @@
+name: Deploy to Cloudflare Pages
+
+# كل push على main بينشر نسخة الإنتاج.
+# كل pull request بيطلع رابط معاينة منفصل، عشان تراجع قبل الدمج.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # push جديد بيلغي النشر اللي قبله بدل ما يتنافسوا على نفس الملفات.
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PAGES_PROJECT: garment-factory
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check the built output
+        run: python3 tools/static_sql_check.py
+
+      # A fork or a repo without the secrets still gets a green build; only the
+      # publishing step is skipped, so the check results stay trustworthy.
+      - name: Look for deployment credentials
+        id: creds
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CLOUDFLARE_API_TOKEN is not set — skipping the deploy."
+            exit 0
+          fi
+          # The token knows which accounts it can reach, so the account id only
+          # has to be set by hand when the token spans more than one account.
+          if [ -z "$ACCOUNT" ]; then
+            ACCOUNT=$(curl -sS -H "Authorization: Bearer $TOKEN" \
+              https://api.cloudflare.com/client/v4/accounts \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin).get("result") or []; print(d[0]["id"] if len(d)==1 else "")')
+          fi
+          if [ -z "$ACCOUNT" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not determine the Cloudflare account — set CLOUDFLARE_ACCOUNT_ID."
+            exit 0
+          fi
+          echo "account=$ACCOUNT" >> "$GITHUB_OUTPUT"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect Cloudflare access
+        if: steps.creds.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ steps.creds.outputs.account }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+
+          token, account = os.environ["TOKEN"], os.environ["ACCOUNT"]
+
+          def get(path):
+              req = urllib.request.Request(
+                  "https://api.cloudflare.com/client/v4" + path,
+                  headers={"Authorization": "Bearer " + token},
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      return json.load(r)
+              except urllib.error.HTTPError as exc:
+                  raw = exc.read()[:300].decode("utf8", "replace")
+                  return {"success": False, "status": exc.code, "body": raw}
+              except Exception as exc:
+                  return {"success": False, "body": str(exc)}
+
+          verify = get("/user/tokens/verify")
+          print("token verify:", verify.get("result", {}).get("status") if verify.get("success") else verify)
+
+          projects = get("/accounts/%s/pages/projects" % account)
+          if projects.get("success"):
+              names = [p["name"] for p in (projects.get("result") or [])]
+              print("pages projects:", names or "(none)")
+          else:
+              print("pages projects: DENIED —", projects.get("status"), projects.get("body"))
+          PY
+
+      - name: Ensure the Pages project exists
+        if: steps.creds.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ steps.creds.outputs.account }}
+          PROJECT: ${{ env.PAGES_PROJECT }}
+        run: |
+          curl -sS -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/pages/projects" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"name\":\"$PROJECT\",\"production_branch\":\"main\"}" \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("project:", "created" if d.get("success") else [e.get("message") for e in d.get("errors",[])])'
+
+      - name: Deploy
+        id: deploy
+        if: steps.creds.outputs.ready == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ steps.creds.outputs.account }}
+          command: >-
+            pages deploy dist
+            --project-name ${{ env.PAGES_PROJECT }}
+            --branch ${{ github.head_ref || github.ref_name }}
+            --commit-dirty=true
+
+      - name: Verify the deployment
+        if: steps.creds.outputs.ready == 'true'
+        run: |
+          python3 tools/smoke_test.py "${{ steps.deploy.outputs.deployment-url }}"
+
+      - name: Summarize
+        run: |
+          {
+            echo "### Build"
+            echo ""
+            echo "Static checks passed."
+            echo ""
+            if [ "${{ steps.creds.outputs.ready }}" = "true" ]; then
+              echo "### Deployed"
+              echo ""
+              echo "${{ steps.deploy.outputs.deployment-url }}"
+            else
+              echo "### Deploy skipped"
+              echo ""
+              echo "Add \`CLOUDFLARE_API_TOKEN\` and \`CLOUDFLARE_ACCOUNT_ID\` to the"
+              echo "repository secrets to publish from CI."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

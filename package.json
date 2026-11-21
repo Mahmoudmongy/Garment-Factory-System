@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "build": "node tools/build-static.js",
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test:db": "bash tools/run_db_tests_local.sh",
+    "check:sql": "python3 tools/static_sql_check.py"
   },
-  "dependencies": {
-    "next": "14.2.5",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "@supabase/supabase-js": "^2.84.0"
-  }
+  "engines": {
+    "node": ">=20"
+  },
+  "description": "نظام إدارة مصنع ملابس — واجهة عربية RTL على Supabase"
 }

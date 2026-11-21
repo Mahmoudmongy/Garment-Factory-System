@@ -1,0 +1,78 @@
+name: Apply database migrations
+
+# بيتشغّل يدوياً، أو تلقائياً لما ملف هجرة جديد يدخل main.
+# محتاج سر واحد: SUPABASE_DB_URL أو SUPABASE_DB_PASSWORD.
+#
+# Direct db.<ref>.supabase.co is IPv6-only, which GitHub runners cannot reach,
+# so the script falls back to the IPv4 pooler when given just the password.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'اعرض المعلّق فقط بدون تطبيق'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**.sql'
+
+concurrency:
+  group: migrations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install psycopg
+        run: pip install 'psycopg[binary]'
+
+      - name: Check for credentials
+        id: creds
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          if [ -n "$DB_URL" ] || [ -n "$DB_PASSWORD" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Neither SUPABASE_DB_URL nor SUPABASE_DB_PASSWORD is set — nothing to do."
+          fi
+
+      - name: Show what is pending
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: python3 tools/apply_migrations.py --status
+
+      - name: Apply
+        if: steps.creds.outputs.ready == 'true' && inputs.dry_run != true
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: python3 tools/apply_migrations.py
+
+      - name: Summarize
+        run: |
+          {
+            echo "### Migrations"
+            echo ""
+            if [ "${{ steps.creds.outputs.ready }}" = "true" ]; then
+              echo "Applied — see the step log for the per-file result."
+            else
+              echo "Skipped: add \`SUPABASE_DB_URL\` (or \`SUPABASE_DB_PASSWORD\`) to the repository secrets."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

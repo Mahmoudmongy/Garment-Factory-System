@@ -1,0 +1,25 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+# الكود بيتغيّر كل نشر، فلازم المتصفح يسأل عنه كل مرة.
+/app.js
+  Cache-Control: no-cache
+
+/db.js
+  Cache-Control: no-cache
+
+/config.js
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+/manifest.json
+  Cache-Control: public, max-age=3600
+
+/sw.js
+  Cache-Control: no-cache
+
+/healthz
+  Content-Type: text/plain; charset=utf-8

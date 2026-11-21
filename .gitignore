@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# tooling / OS
+.DS_Store
+Thumbs.db
+*.log
+.agent_tmp/
+
+# local databases
+*.sqlite
+*.sqlite3
+*.db
