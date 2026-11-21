@@ -1,0 +1,77 @@
+# النشر على Cloudflare Pages
+
+التطبيق كله ملفات ثابتة: `preview/` بيتقدّم زي ما هو، والمتصفح بيكلم Supabase
+مباشرة. مفيش سيرفر Node في المسار ده، فمفيش cold start ومفيش سيرفر يقف.
+
+## ليه ده آمن مع إن المفتاح في ملف ثابت
+
+`preview/config.js` فيه `sb_publishable_...`. المفتاح ده مش سر — Supabase
+بتبعت نفس النوع للمتصفح في أي تطبيق، والحماية بتيجي من الصلاحيات مش من
+إخفاء المفتاح.
+
+اتأكدنا من ده بالفعل على المشروع الفعلي: دور `anon` بياخد **401** على القراءة
+والكتابة في كل جدول (`42501` = صلاحيات ناقصة)، و`/auth/v1/admin/users` كذلك.
+يعني حتى لو حد لقي المفتاح، مش هيقدر يقرأ صف واحد من غير جلسة مستخدم حقيقية.
+
+**متحطّ في الريبو أبدًا:** `service_role` key أو كلمة سر القاعدة. دول بيتخطّوا
+RLS بالكامل.
+
+## النشر — الطريقة الأولى: ربط GitHub
+
+أسهل طريقة، ومناسبة لو عايز كل push ينشر لوحده.
+
+1. ادخل [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages** → **Create**.
+2. اختار **Pages** → **Connect to Git**.
+3. اختار ريبو `Garment-Factory-System` والفرع اللي عايز تنشر منه.
+4. في إعدادات البناء:
+
+| الحقل | القيمة |
+|---|---|
+| Framework preset | **None** |
+| Build command | اتركه **فاضي** |
+| Build output directory | `preview` |
+
+5. **Save and Deploy**.
+
+مفيش build، فالنشر بيخلص في ثواني.
+
+## النشر — الطريقة الثانية: من الطرفية
+
+```bash
+npx wrangler pages deploy preview --project-name garment-factory
+```
+
+أول مرة هيفتح المتصفح عشان تسجّل دخول Cloudflare. بعد كده الأوامر بتشتغل
+من غير تفاعل.
+
+## التحقق بعد النشر
+
+الـ `/healthz` هنا ملف ثابت بيرجع `ok`، فهو **مش** بيفحص Supabase. النشر
+الأخضر مش دليل إن الداتابيز متوصلة. الاختبار الحقيقي:
+
+```bash
+python3 tools/smoke_test.py https://<project>.pages.dev
+```
+
+بعدين افتح الموقع وسجّل دخول. لو الدخول نجح، يبقى الاتصال بـ Supabase سليم.
+
+## إيه اللي بيتغيّر عن تشغيل Node
+
+`server.js` فضل موجود وبيشتغل على Railway أو أي استضافة فيها Node. الفرق إنه
+بيولّد `/config.js` من متغيرات البيئة وقت الطلب، بينما على Cloudflare الملف
+ثابت. الاتنين بيصدّروا نفس المتغيرين (`window.OB_SUPABASE_URL` و
+`window.OB_SUPABASE_KEY`)، فالواجهة مش بتفرّق.
+
+| | Node (`server.js`) | Cloudflare Pages |
+|---|---|---|
+| `config.js` | بيتولّد وقت الطلب من env | ملف ثابت في الريبو |
+| تغيير مشروع Supabase | غيّر env واعمل restart | عدّل الملف واعمل push |
+| الرؤوس الأمنية | في الكود | `preview/_headers` |
+| `/healthz` | بيرد `ok` من السيرفر | ملف ثابت فيه `ok` |
+
+## حاجات لسه ناقصة
+
+- **مفيش service worker.** الـ manifest موجود، فالتثبيت على الموبايل بيشتغل،
+  بس التطبيق مش بيشتغل offline. المرجع بيشتغل.
+- **`/healthz` مش بيفحص حاجة** على Cloudflare. لو عايز مراقبة حقيقية، استخدم
+  Cloudflare Health Checks أو ping لـ Supabase REST مباشرة.

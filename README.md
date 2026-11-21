@@ -11,7 +11,7 @@
 | البيانات | Supabase (PostgREST + Auth + PostgreSQL 15) |
 | المنطق | 38 دالة `rpc_*` في القاعدة — كل كتابة بتعدي من دالة |
 | الأمان | RLS: قراءة فقط للجداول، وكل كتابة عبر `rpc_*` |
-| التشغيل | `server.js` (Node، بدون اعتماديات) على Railway |
+| التشغيل | Cloudflare Pages (ملفات ثابتة) أو `server.js` على Railway |
 
 **القاعدة هي مصدر الحقيقة الوحيد.** مفيش رصيد مخزّن: كل رصيد بيتحسب من صفوف الـ ledger
 وقت القراءة.
@@ -25,6 +25,8 @@ npm start        # http://localhost:3000
 ```
 
 الإعداد الكامل من الصفر (الجداول، أول أدمن، النشر): [`docs/SETUP.md`](docs/SETUP.md).
+
+النشر على Cloudflare Pages: [`docs/DEPLOY_CLOUDFLARE.md`](docs/DEPLOY_CLOUDFLARE.md).
 
 ## الاختبارات
 
