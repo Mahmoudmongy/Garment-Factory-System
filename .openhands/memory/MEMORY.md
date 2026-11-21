@@ -58,4 +58,11 @@ See `2026-11-20.md` for detail and the traps that cost time.
   to fire; attaching the listener alone does nothing.
 - Platform reserves ports 12000/12001; test harnesses should use 12009+.
 - `gh` needs `GH_TOKEN=$GITHUB_TOKEN`; that token can push but has no Secrets scope.
-- PR #1 (draft) on branch `rebuild-full-ui` is the live review surface.
+- Admin login is `admin` → `admin@factory.internal` (the app appends the domain
+  in `db.js:emailFor`). Created by `.github/workflows/create-admin.yml`.
+- Supabase `/auth/v1/signup` REJECTS `@factory.internal` (`email_address_invalid`),
+  so the first user must be made through the Admin API with the service-role key.
+- No RLS policy grants insert/update on `public.profiles`; the profile row must be
+  written over a direct DB connection, not from the client.
+- Run locally: `printf 'SUPABASE_URL=...\nSUPABASE_PUBLISHABLE_KEY=...\nPORT=12000\n' > .env.runtime`
+  then `set -a && . ./.env.runtime && set +a && node server.js`. `.env.runtime` is gitignored.

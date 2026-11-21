@@ -1,0 +1,55 @@
+name: Deploy Supabase edge functions
+
+# The admin-create-user function is what lets the app create a login. It needs the
+# service-role key, so it runs on Supabase rather than in the browser. Until it is
+# deployed, every call returns 404 and the browser reports it as a dead server,
+# because the failed CORS preflight surfaces as a network TypeError.
+#
+# Needs one secret: SUPABASE_ACCESS_TOKEN (a Supabase personal access token).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+      - '.github/workflows/deploy-functions.yml'
+
+concurrency:
+  group: deploy-functions
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for credentials
+        id: creds
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SUPABASE_ACCESS_TOKEN is not set — cannot deploy functions."
+          fi
+
+      - uses: supabase/setup-cli@v1
+        if: steps.creds.outputs.ready == 'true'
+        with:
+          version: latest
+
+      - name: Deploy admin-create-user
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy admin-create-user \
+            --project-ref "${{ vars.SUPABASE_PROJECT_REF || 'xfttxitgwqvqztssbxra' }}" \
+            --use-api

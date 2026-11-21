@@ -143,15 +143,24 @@
      الدالة بتتحقق من صلاحية الطالب بنفس الـ JWT بتاعه، فالصلاحية بتتقيّم في القاعدة. */
   const adminCreateUser = async (payload) => {
     await refreshIfNeeded();
-    const res = await fetch(SUPABASE_URL + '/functions/v1/admin-create-user', {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: 'Bearer ' + accessToken(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload || {}),
-    });
+    let res;
+    try {
+      res = await fetch(SUPABASE_URL + '/functions/v1/admin-create-user', {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: 'Bearer ' + accessToken(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload || {}),
+      });
+    } catch (e) {
+      /* الـ preflight بيرجع 404 لو الدالة مش منشورة، والمتصفح بيبلّغ عنها
+         كأنها شبكة مقطوعة. الرسالة دي بتوجّه لسببها الحقيقي بدل ما تضلّل. */
+      const err = new Error('E_FUNCTION_UNREACHABLE');
+      err.status = 0;
+      throw err;
+    }
     const body = await unwrap(res);
     if (body && body.error) throw new Error(body.error);
     return body;
