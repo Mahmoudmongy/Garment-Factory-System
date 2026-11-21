@@ -13,13 +13,20 @@ DB: PostgreSQL 15 via `supabase/migrations/` (0001 → 0018).
 - Syntax: `node --check preview/app.js`
 
 **Shape (verify, don't assume)**: 32 tables, 5 `v_*` views in migrations,
-41 `rpc_*`, 18 migrations. Live DB was 14 migrations applied on 2026-11-21 —
-0015–0018 are written but NOT applied there.
+41 `rpc_*`, 18 migrations. All 18 are applied on the live DB as of 2026-11-21;
+0015–0018 landed via the `apply-migrations.yml` workflow.
 
-**Deploy gap**: `SUPABASE_DB_URL` and `CLOUDFLARE_API_TOKEN` are not in the
-sandbox, and `db.<ref>.supabase.co` does not resolve from it, so migrations
-must be applied from the dev machine or CI. `tools/apply_migrations.py` is the
-tool (`--status`, `--dry-run`); it needs `psycopg`.
+**CI/CD**: DB password secret is `DATABASE_PASSWORD` (not `SUPABASE_DB_URL`,
+which holds an https URL, not a connection string). The password needs
+percent-encoding; `db.<ref>.supabase.co` is IPv6-only, so use the IPv4 pooler as
+`postgres.<ref>` (`aws-1-eu-west-1` works). Migrations apply from the
+`apply-migrations.yml` workflow. The Cloudflare token verifies but reaches zero
+accounts, so Pages is unreachable until it gets `Account → Cloudflare Pages →
+Edit`; `garment-factory.pages.dev` is live but stale (v1 vs repo v6).
+
+**Deploy gap**: the secrets are not in the sandbox and `db.<ref>.supabase.co`
+does not resolve from it, so migrations must be applied from CI.
+`tools/apply_migrations.py` (`--status`, `--dry-run`) needs `psycopg`.
 
 **Invariants**
 - Balances are never stored; views aggregate ledger rows.
