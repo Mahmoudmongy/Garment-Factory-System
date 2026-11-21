@@ -84,6 +84,10 @@ const ERRORS = {
   E_OVER_DELIVERY: 'الكمية أكبر من الجاهز للتسليم', E_ORDER_REQUIRED: 'اختار الأمر',
   E_OVER_ISSUE: 'الكمية أكبر من المتاح في المخزن',
   E_CUSTOMER_EXISTS: 'العميل ده متسجّل قبل كده — نفس الاسم أو نفس التليفون',
+  E_FUNCTION_UNREACHABLE: 'خدمة إنشاء الحسابات مش متاحة على السرفر — إضافة المستخدمين متوقفة مؤقتاً، كلّم مسؤول النظام',
+  E_PASSWORD_SHORT: 'كلمة السر لازم ٨ حروف على الأقل',
+  E_USER_CREATE_FAILED: 'مش قادرين نعمل الحساب دلوقتي — حاول تاني، ولو المشكلة فضلت كلّم مسؤول النظام',
+  E_METHOD_NOT_ALLOWED: 'طلب غير مدعوم',
 };
 const humanError = (e) => {
   /* fetch بيرمي TypeError من غير أي كود لما الشبكة تقطع. الرسالة الخام
@@ -1345,120 +1349,259 @@ async function pageOrderNew() {
 async function pageTemplates() {
   loading();
   const templates = await table('stage_templates');
+  if (!templates.length) {
+    app.innerHTML = `
+      ${pageHead('قوالب المراحل',
+        'المراحل وأسعار القطعة لكل موديل — الأمر بياخد نسخة وقت إنشاؤه',
+        `<a class="btn btn-ghost" href="#orders">رجوع</a>
+         <button class="btn btn-primary" id="newTpl">${btnIcon('plus', 'قالب جديد')}</button>`)}
+      ${emptyState('file', 'مفيش قوالب لسه', 'اعمل قالب جديد وحدّد مراحله وأسعاره')}`;
+    $('#newTpl').onclick = () => renderTemplateEditor(null, []);
+    return;
+  }
+
   const list = await Promise.all(templates.map(async (t) => ({
     t, stages: await table('stage_template_stages', { template_id: t.id }),
   })));
-  app.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-      <div><h1 style="margin:0">قوالب المراحل</h1>
-        <p class="sub" style="margin:4px 0 0">كل موديل ليه مراحله واعتمادياتها وأسعارها</p></div>
-      <button class="btn btn-primary" id="newTpl">+ قالب جديد</button>
-    </div>
-    ${list.map(({ t, stages }) => `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <b>${esc(t.name_ar)}</b>
-          <div style="display:flex;gap:8px;align-items:center">
-            ${t.is_default ? '<span class="chip chip-open">افتراضي</span>' : ''}
-            <button class="btn btn-ghost btn-sm" data-edit="${esc(t.id)}">تعديل</button>
-          </div>
-        </div>
-        ${tbl([
-          { label: '#', render: (r) => num(r.seq) },
-          { label: 'المرحلة', key: 'name_ar' },
-          { label: 'الكود', render: (r) => `<span class="mono hint">${esc(r.code)}</span>` },
-          { label: 'بتبدأ بعد', render: (r) => esc(depList(r.depends_on)) },
-          { label: 'سعر القطعة', num: true, render: (r) => money(r.piece_price) },
-        ], stages, 'مفيش مراحل')}
-      </div>`).join('')}
-    <a class="btn btn-ghost" href="#orders">رجوع للأوامر</a>
-    <div id="tplBox" style="margin-top:14px"></div>`;
 
-  $('#newTpl').onclick = () => renderTemplateForm(null, []);
-  app.querySelectorAll('[data-edit]').forEach((b) => {
+  const wanted = String(location.hash.split('/')[1] || '');
+  const active = list.find((x) => x.t.id === wanted) || list.find((x) => x.t.is_default) || list[0];
+
+  app.innerHTML = `
+    ${pageHead('قوالب المراحل',
+      'المراحل وأسعار القطعة لكل موديل — الأمر بياخد نسخة وقت إنشاؤه',
+      `<a class="btn btn-ghost" href="#orders">رجوع</a>
+       <button class="btn btn-primary" id="newTpl">${btnIcon('plus', 'قالب جديد')}</button>`)}
+    <div class="chips" id="tplTabs">
+      ${list.map(({ t }) => `<button class="chip ${t.id === active.t.id ? 'chip-open' : 'chip-idle'}"
+        data-tab="${esc(t.id)}">${esc(t.name_ar)}${t.is_default ? ' ★' : ''}</button>`).join('')}
+    </div>
+    <div id="tplBody"></div>`;
+
+  $('#newTpl').onclick = () => renderTemplateEditor(null, []);
+  app.querySelectorAll('[data-tab]').forEach((b) => {
     b.onclick = () => {
-      const entry = list.find((x) => x.t.id === b.dataset.edit);
-      renderTemplateForm(entry.t, entry.stages);
+      location.hash = 'templates/' + b.dataset.tab;
+      pageTemplates();
     };
   });
+
+  renderTemplateEditor(active.t, active.stages, list);
 }
 
-/* The template editor is one row per stage; `depends_on` is entered as a comma
-   separated list of stage codes, which is what the RPC stores. */
-function renderTemplateForm(tpl, stages) {
-  const rows = stages.length ? stages.map((s) => ({
-    name_ar: s.name_ar, code: s.code, piece_price: s.piece_price,
-    depends_on: (Array.isArray(s.depends_on) ? s.depends_on : []).join(', '),
-  })) : [{ name_ar: '', code: '', piece_price: 0, depends_on: '' }];
+/* كل مرحلة ليها كارت وأزرار ترتيب، والاعتماديات بتتحدد من المراحل الموجودة بدل كتابة الأكواد يدوي. */
+function renderTemplateEditor(tpl, stages, allTemplates) {
+  const box = $('#tplBody') || app;
+  const rows = stages.length
+    ? stages.map((s) => ({
+        name_ar: s.name_ar || '', code: s.code || '',
+        piece_price: s.piece_price ?? 0,
+        depends_on: Array.isArray(s.depends_on) ? s.depends_on.slice() : [],
+        is_operations: !!s.is_operations,
+        is_final: !!s.is_final,
+      }))
+    : [blankStage()];
 
-  $('#tplBox').innerHTML = `
-    <div class="card">
-      <h2 style="margin-top:0">${tpl ? 'تعديل قالب' : 'قالب جديد'}</h2>
-      <label class="label">اسم القالب</label>
-      <input id="tplName" class="input" value="${esc(tpl?.name_ar || '')}" placeholder="قميص">
-      <h2>المراحل</h2>
-      <div id="tplRows">${rows.map((r, i) => templateRow(r, i)).join('')}</div>
-      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-        <button class="btn btn-ghost" id="addRow">+ مرحلة</button>
-        <button class="btn btn-primary" id="saveTpl">حفظ</button>
-        <button class="btn btn-ghost" id="cancelTpl">إلغاء</button>
+  const draw = () => {
+    box.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <h2 style="margin:0">${tpl ? 'مراحل «' + esc(tpl.name_ar) + '»' : 'قالب جديد'}</h2>
+          ${tpl ? '<button class="btn btn-ghost btn-sm" id="renameTpl">تغيير الاسم</button>' : ''}
+        </div>
+        <div id="stageList" style="margin-top:14px"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn btn-ghost" id="addStage">${btnIcon('plus', 'مرحلة')}</button>
+          <button class="btn btn-primary" id="saveTpl">حفظ المراحل</button>
+        </div>
+      </div>`;
+
+    paintStages();
+
+    $('#addStage').onclick = () => { rows.push(blankStage()); paintStages(); };
+    const renameBtn = $('#renameTpl');
+    if (renameBtn) renameBtn.onclick = () => renameTemplate(tpl);
+    $('#saveTpl').onclick = () => saveTemplate(tpl, rows, allTemplates);
+  };
+
+  /* كل مرحلة بتترسم لوحدها، والاعتماديات بتتبني من المراحل اللي فوقيها. */
+  const paintStages = () => {
+    const host = $('#stageList');
+    host.innerHTML = rows.map((r, i) => stageCard(r, i, rows)).join('') ||
+      '<div class="empty">ضيف مرحلة واحدة على الأقل</div>';
+
+    host.querySelectorAll('[data-f]').forEach((inp) => {
+      inp.oninput = () => {
+        const i = Number(inp.dataset.i);
+        const f = inp.dataset.f;
+        rows[i][f] = inp.type === 'number' ? Number(inp.value || 0) : inp.value;
+        /* الكود هو مفتاح الاعتماديات، فتغييره بيعيد رسم المربعات. */
+        if (f === 'code') {
+          const caret = inp.selectionStart;
+          paintStages();
+          const again = host.querySelector(`[data-f="code"][data-i="${i}"]`);
+          if (again) { again.focus(); again.setSelectionRange(caret, caret); }
+        }
+      };
+    });
+
+    host.querySelectorAll('[data-dep]').forEach((cb) => {
+      cb.onchange = () => {
+        const i = Number(cb.dataset.i);
+        const code = cb.dataset.dep;
+        const set = new Set(rows[i].depends_on);
+        if (cb.checked) set.add(code); else set.delete(code);
+        rows[i].depends_on = Array.from(set);
+      };
+    });
+
+    host.querySelectorAll('[data-up]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.up);
+        if (i === 0) return;
+        [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]];
+        paintStages();
+      };
+    });
+    host.querySelectorAll('[data-down]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.down);
+        if (i >= rows.length - 1) return;
+        [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]];
+        paintStages();
+      };
+    });
+    host.querySelectorAll('[data-del]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.del);
+        const gone = rows[i].code;
+        rows.splice(i, 1);
+        /* مرحلة اتشالت ما ينفعش تفضل مطلوبة عند غيرها. */
+        rows.forEach((r) => { r.depends_on = r.depends_on.filter((c) => c !== gone); });
+        paintStages();
+      };
+    });
+  };
+
+  draw();
+}
+
+const blankStage = () => ({
+  name_ar: '', code: '', piece_price: 0, depends_on: [],
+  is_operations: false, is_final: false,
+});
+
+function stageCard(r, i, rows) {
+  const picked = Array.isArray(r.depends_on) ? r.depends_on : [];
+  /* الخيارات: المراحل اللي قبلها. ولو المرحلة كانت معتمدة على مرحلة تانية
+     واتحركت لفوق، بنفضل نعرضها — وإلا الاعتمادية تختفي من الشاشة وتفضل
+     متسجّلة من غير ما حد يشوفها أو يقدر يشيلها. */
+  const earlier = rows.slice(0, i).filter((x) => x.code && x.code.trim());
+  const earlierCodes = new Set(earlier.map((x) => x.code));
+  const orphans = picked
+    .filter((c) => !earlierCodes.has(c))
+    .map((c) => rows.find((x) => x.code === c) || { code: c, name_ar: c });
+  const before = earlier.concat(orphans);
+  const deps = before.length
+    ? `<div class="grid g4" style="margin-top:10px;align-items:end">
+         ${before.map((x) => `
+           <label class="label" style="display:flex;gap:6px;align-items:center;font-weight:400">
+             <input type="checkbox" data-dep="${esc(x.code)}" data-i="${i}"
+               ${picked.includes(x.code) ? 'checked' : ''}>
+             ${esc(x.name_ar || x.code)}
+           </label>`).join('')}
+       </div>
+       <p class="hint" style="margin:6px 0 0">${picked.length
+         ? 'مش هتتسلّم غير بعد ما اللي متعلّم عليها يخلص'
+         : 'مش معتمدة على حاجة — تتسلّم في أي وقت بعد القص'}</p>`
+    : '<p class="hint" style="margin:10px 0 0">مش معتمدة على حاجة — تتسلّم في أي وقت بعد القص</p>';
+
+  return `<div class="card" style="margin-bottom:10px;background:var(--surface-2,#fafafa)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b>${num(i + 1)}. ${esc(r.name_ar || 'المرحلة ' + num(i + 1))}</b>
+      <div style="display:flex;gap:4px">
+        <button class="btn btn-ghost btn-sm" data-up="${i}" title="فوق" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="btn btn-ghost btn-sm" data-down="${i}" title="تحت"
+          ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="btn btn-ghost btn-sm" data-del="${i}" title="حذف">✕</button>
       </div>
-      <p class="hint" style="margin-top:10px">«بتبدأ بعد» بتتكتب بأكواد المراحل مفصولة بفاصلة،
-        مثال: <span class="mono">collar, chest</span>. سيبها فاضية لو المرحلة من البداية.</p>
-    </div>`;
-
-  const reindex = () => {
-    $('#tplRows').querySelectorAll('.tpl-row').forEach((el, i) => {
-      el.querySelectorAll('[data-f]').forEach((inp) => { inp.dataset.i = i; });
-    });
-  };
-
-  $('#addRow').onclick = () => {
-    const i = $('#tplRows').querySelectorAll('.tpl-row').length;
-    $('#tplRows').insertAdjacentHTML('beforeend',
-      templateRow({ name_ar: '', code: '', piece_price: 0, depends_on: '' }, i));
-    reindex();
-  };
-  $('#cancelTpl').onclick = () => { $('#tplBox').innerHTML = ''; };
-
-  $('#saveTpl').onclick = async () => {
-    const name = $('#tplName').value.trim();
-    if (!name) { notify('اكتب اسم القالب'); return; }
-    const payload = [];
-    $('#tplRows').querySelectorAll('.tpl-row').forEach((el, i) => {
-      const val = (f) => el.querySelector(`[data-f="${f}"]`).value;
-      const nm = val('name_ar').trim();
-      const code = val('code').trim();
-      if (!nm || !code) return;
-      payload.push({
-        seq: payload.length + 1, name_ar: nm, code,
-        piece_price: Number(val('piece_price') || 0),
-        depends_on: val('depends_on').split(',').map((x) => x.trim()).filter(Boolean),
-      });
-    });
-    if (!payload.length) { notify('ضيف مرحلة واحدة على الأقل بكود'); return; }
-    try {
-      await rpc('rpc_save_stage_template', {
-        p_template: tpl?.id || null, p_name: name, p_stages: payload,
-      });
-      pageTemplates();
-    } catch (e) { notifyErr(humanError(e)); }
-  };
+    </div>
+    <div class="grid g3" style="align-items:end">
+      <div><label class="label">الاسم</label>
+        <input class="input" data-f="name_ar" data-i="${i}" value="${esc(r.name_ar)}" placeholder="اللياقات"></div>
+      <div><label class="label">الكود (إنجليزي)</label>
+        <input class="input mono" data-f="code" data-i="${i}" value="${esc(r.code)}" placeholder="collar"></div>
+      <div><label class="label">سعر القطعة</label>
+        <input class="input" type="number" min="0" step="0.01" data-f="piece_price" data-i="${i}"
+          value="${esc(r.piece_price ?? 0)}"></div>
+    </div>
+    ${deps}
+  </div>`;
 }
 
-function templateRow(r, i) {
-  return `<div class="tpl-row grid g4" style="margin-bottom:8px;align-items:end">
-    <div><label class="label">الاسم</label>
-      <input class="input" data-f="name_ar" data-i="${i}" value="${esc(r.name_ar || '')}" placeholder="اللياقات"></div>
-    <div><label class="label">الكود</label>
-      <input class="input mono" data-f="code" data-i="${i}" value="${esc(r.code || '')}" placeholder="collar"></div>
-    <div><label class="label">سعر القطعة</label>
-      <input class="input" type="number" min="0" step="0.01" data-f="piece_price" data-i="${i}"
-        value="${esc(r.piece_price ?? 0)}"></div>
-    <div><label class="label">بتبدأ بعد</label>
-      <input class="input mono" data-f="depends_on" data-i="${i}"
-        value="${esc(r.depends_on || '')}" placeholder="collar, chest"></div>
-  </div>`;
+/* الحفظ بيستبدل كل مراحل القالب، فلازم تغيير الاسم يبعت المراحل الحالية عشان ما تتمسحش. */
+async function renameTemplate(tpl) {
+  const v = await formDialog('تغيير اسم القالب', [
+    { key: 'name_ar', label: 'اسم القالب', value: tpl.name_ar, required: true },
+  ]);
+  if (!v || !v.name_ar.trim()) return;
+  const current = await table('stage_template_stages', { template_id: tpl.id });
+  const stages = current.map((s, i) => ({
+    seq: i + 1, name_ar: s.name_ar, code: s.code,
+    piece_price: s.piece_price, depends_on: s.depends_on || [],
+    is_operations: !!s.is_operations, is_final: !!s.is_final,
+  }));
+  try {
+    await rpc('rpc_save_stage_template', {
+      p_template: tpl.id, p_name: v.name_ar.trim(), p_stages: stages,
+    });
+    pageTemplates();
+  } catch (e) { notifyErr(humanError(e)); }
+}
+
+async function saveTemplate(tpl, rows, allTemplates) {
+  const name = tpl ? tpl.name_ar : null;
+  const payload = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i];
+    const nm = String(r.name_ar || '').trim();
+    const code = String(r.code || '').trim();
+    if (!nm && !code) continue;
+    if (!nm || !code) { notify('كل مرحلة محتاجة اسم وكود'); return; }
+    payload.push({
+      seq: payload.length + 1, name_ar: nm, code,
+      piece_price: Number(r.piece_price || 0),
+      depends_on: (r.depends_on || []).filter(Boolean),
+      is_operations: !!r.is_operations,
+      is_final: !!r.is_final,
+    });
+  }
+  if (!payload.length) { notify('ضيف مرحلة واحدة على الأقل'); return; }
+
+  const codes = payload.map((s) => s.code);
+  if (new Set(codes).size !== codes.length) { notify('في كود مكرر — كل مرحلة ليها كود مختلف'); return; }
+  const bad = payload.find((s) => s.depends_on.some((d) => !codes.includes(d)));
+  if (bad) { notify('مرحلة «' + bad.name_ar + '» معتمدة على مرحلة مش موجودة'); return; }
+
+  let id = tpl && tpl.id;
+  let tplName = name;
+  if (!id) {
+    const v = await formDialog('قالب جديد', [
+      { key: 'name_ar', label: 'اسم القالب', value: '', required: true },
+    ]);
+    if (!v || !v.name_ar.trim()) return;
+    tplName = v.name_ar.trim();
+  }
+
+  try {
+    const res = await rpc('rpc_save_stage_template', {
+      p_template: id || null, p_name: tplName, p_stages: payload,
+    });
+    id = (res && res.id) || id;
+    notify('اتحفظ القالب');
+    location.hash = id ? 'templates/' + id : 'templates';
+    pageTemplates();
+  } catch (e) { notifyErr(humanError(e)); }
 }
 
 /* ------------------------------------------------------------------ الشنط */

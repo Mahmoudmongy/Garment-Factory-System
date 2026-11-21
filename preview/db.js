@@ -54,7 +54,14 @@
     let body = null;
     if (text) { try { body = JSON.parse(text); } catch (e) { body = text; } }
     if (!res.ok) {
-      const msg = (body && (body.message || body.error_description || body.hint)) || ('HTTP ' + res.status);
+      const apiError = body && typeof body.error === 'string' ? body.error : '';
+      if (/^E_[A-Z_]+(?:[|\s]|$)/.test(apiError)) {
+        const err = new Error(apiError);
+        err.status = res.status;
+        err.code = apiError.split(/[|\s]/)[0];
+        throw err;
+      }
+      const msg = (body && (body.message || body.error_description || body.hint || body.error)) || ('HTTP ' + res.status);
       const err = new Error(body && body.code ? body.code + '|' + msg : msg);
       err.status = res.status;
       err.code = body && body.code;
@@ -143,15 +150,24 @@
      الدالة بتتحقق من صلاحية الطالب بنفس الـ JWT بتاعه، فالصلاحية بتتقيّم في القاعدة. */
   const adminCreateUser = async (payload) => {
     await refreshIfNeeded();
-    const res = await fetch(SUPABASE_URL + '/functions/v1/admin-create-user', {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: 'Bearer ' + accessToken(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload || {}),
-    });
+    let res;
+    try {
+      res = await fetch(SUPABASE_URL + '/functions/v1/admin-create-user', {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: 'Bearer ' + accessToken(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload || {}),
+      });
+    } catch (e) {
+      /* الـ preflight بيرجع 404 لو الدالة مش منشورة، والمتصفح بيبلّغ عنها
+         كأنها شبكة مقطوعة. الرسالة دي بتوجّه لسببها الحقيقي بدل ما تضلّل. */
+      const err = new Error('E_FUNCTION_UNREACHABLE');
+      err.status = 0;
+      throw err;
+    }
     const body = await unwrap(res);
     if (body && body.error) throw new Error(body.error);
     return body;
