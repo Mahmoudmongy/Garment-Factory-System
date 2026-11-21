@@ -46,14 +46,31 @@ RLS بالكامل.
 لو الخطأ فضل، شوف اللوج في **Deployments → آخر نشر → View build log**.
 أول سطر خطأ هو المهم، والباقي غالباً تبعات.
 
-## النشر — الطريقة الثانية: من الطرفية
+## النشر — الطريقة الثانية: أمر واحد من الطرفية
+
+محتاج توكن واحد بس:
+
+1. [dash.cloudflare.com](https://dash.cloudflare.com) → أيقونة الحساب → **My Profile**
+   → **API Tokens** → **Create Token**.
+2. اختار **Custom token** وحط الصلاحية:
+   `Account` → `Cloudflare Pages` → **Edit**.
+3. انسخ التوكن (بيظهر مرة واحدة) وحطه كـ secret اسمه `CLOUDFLARE_API_TOKEN`.
+
+بعد كده:
 
 ```bash
-npx wrangler pages deploy preview --project-name garment-factory
+bash tools/deploy-cloudflare.sh
 ```
 
-أول مرة هيفتح المتصفح عشان تسجّل دخول Cloudflare. بعد كده الأوامر بتشتغل
-من غير تفاعل.
+السكربت بيتحقق من التوكن، بيبني `dist/`، بيعمل المشروع لو مش موجود،
+بيرفع، وبعدها بيشغّل `smoke_test.py` على الرابط المنشور. لو أي خطوة فشلت
+بيوقف ويقول السبب — مش بيقول "تم" وهو فاشل.
+
+`Account ID` مش محتاج تحدده، السكربت بيجيبه من التوكن. لو عندك أكتر من حساب
+حدده في `CLOUDFLARE_ACCOUNT_ID`.
+
+**مهم:** التوكن ده بيدير حسابك عند Cloudflare. متحطّهوش في الريبو ولا في
+أي ملف متعقّب في git — secret في البيئة بس.
 
 ## التحقق بعد النشر
 
