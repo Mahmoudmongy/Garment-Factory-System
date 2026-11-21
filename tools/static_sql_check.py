@@ -35,11 +35,12 @@ for f in files:
 created |= {"has_permission"}
 for fn, where in sorted(called.items()):
     if fn not in created: errors.append(f"function public.{fn}() is called in {sorted(where)} but never created")
-tests = open(root / "supabase/tests/001_foundation.test.sql", encoding="utf8").read()
-codes = set(re.findall(r"errcode = '(F\d{4})'", "".join(open(f, encoding="utf8").read() for f in files if "migrations" in f)))
-for c in set(re.findall(r"'(F\d{4})'", tests)):
-    if c not in codes: errors.append(f"test expects errcode {c} that no migration raises")
-print(f"files checked: {len(files)} | functions created: {len(created)} | custom errcodes raised: {sorted(codes)}")
+tests = "".join(open(f, encoding="utf8").read() for f in glob.glob(str(root / "supabase/tests/*.test.sql")))
+migrations = "".join(open(f, encoding="utf8").read() for f in files if "migrations" in f)
+codes = set(re.findall(r"fn_raise\('(E_[A-Z_]+)'", migrations))
+for c in set(re.findall(r"'(E_[A-Z_]+)", tests)):
+    if c not in codes: errors.append(f"test expects error code {c} that no migration raises")
+print(f"files checked: {len(files)} | functions created: {len(created)} | error codes raised: {len(codes)}")
 print("STATIC CHECK:", "FAILED" if errors else "no problems found (this proves nothing about runtime behaviour)")
 for e in errors: print(" -", e)
 sys.exit(1 if errors else 0)
