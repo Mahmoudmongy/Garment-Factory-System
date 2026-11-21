@@ -26,6 +26,16 @@ except ImportError:
 ROOT = Path(__file__).resolve().parent.parent
 MIGRATIONS = ROOT / "supabase" / "migrations"
 
+PROJECT_REF = "xfttxitgwqvqztssbxra"
+
+# Direct connections to db.<ref>.supabase.co are IPv6-only, which fails on hosts
+# without IPv6 (GitHub runners, most sandboxes). The pooler is IPv4 and needs
+# the user written as postgres.<ref>.
+POOLER_REGIONS = [
+    "eu-central-1", "us-east-1", "us-west-1", "eu-west-1", "eu-west-2",
+    "ap-southeast-1", "ap-northeast-1", "sa-east-1", "ca-central-1",
+]
+
 BOOKKEEPING = """
 create table if not exists public.schema_migrations (
     filename    text primary key,
@@ -35,11 +45,44 @@ create table if not exists public.schema_migrations (
 """
 
 
+def candidate_urls():
+    """Every connection string worth trying, most likely first."""
+    explicit = os.environ.get("SUPABASE_DB_URL")
+    if explicit:
+        yield explicit
+
+    password = os.environ.get("SUPABASE_DB_PASSWORD")
+    if not password:
+        return
+
+    ref = os.environ.get("SUPABASE_PROJECT_REF", PROJECT_REF)
+    yield f"postgresql://postgres:{password}@db.{ref}.supabase.co:5432/postgres"
+    for region in POOLER_REGIONS:
+        for prefix in ("aws-0", "aws-1"):
+            yield (
+                f"postgresql://postgres.{ref}:{password}"
+                f"@{prefix}-{region}.pooler.supabase.com:5432/postgres"
+            )
+
+
 def connect():
-    url = os.environ.get("SUPABASE_DB_URL")
-    if not url:
-        sys.exit("SUPABASE_DB_URL is not set (postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres)")
-    return psycopg.connect(url, connect_timeout=20, autocommit=False)
+    if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DB_PASSWORD")):
+        sys.exit(
+            "set SUPABASE_DB_URL (postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres)\n"
+            "or SUPABASE_DB_PASSWORD — the pooler fallback needs only the password."
+        )
+
+    errors = []
+    for url in candidate_urls():
+        host = url.split("@")[-1].split("/")[0]
+        try:
+            conn = psycopg.connect(url, connect_timeout=8, autocommit=False)
+            print(f"connected via {host}")
+            return conn
+        except Exception as exc:
+            errors.append(f"  {host}: {str(exc).strip().splitlines()[0][:110]}")
+
+    sys.exit("could not reach the database:\n" + "\n".join(errors))
 
 
 def checksum(text):
