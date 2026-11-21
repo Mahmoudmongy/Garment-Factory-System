@@ -55,6 +55,13 @@ const ERRORS = {
   E_OVER_ISSUE: 'الكمية أكبر من المتاح في المخزن',
 };
 const humanError = (e) => {
+  /* fetch بيرمي TypeError من غير أي كود لما الشبكة تقطع. الرسالة الخام
+     "Failed to fetch" مش مفهومة لمستخدم في المصنع. */
+  if (e instanceof TypeError && !e.status) {
+    return navigator.onLine === false
+      ? 'مفيش نت على الجهاز. البيانات بتيجي من السرفر، فوصّل الواي فاي أو الداتا وحاول تاني'
+      : 'السرفر مش راد. النت شغال بس مش بنوصل للسرفر — استنى شوية وحاول تاني';
+  }
   const [code, detail] = String(e.message || '').split('|');
   return (ERRORS[code] || code) + (detail ? ' (' + detail + ')' : '');
 };
@@ -1815,10 +1822,12 @@ async function pageCustomers() {
     ], fabric, 'مفيش قماش')}`;
 
   $('#newCust').onclick = async () => {
-    const name = prompt('اسم العميل');
-    if (!name) return;
-    const phone = prompt('التليفون (اختياري)') || null;
-    try { await rpc('rpc_create_customer', { p_name: name, p_phone: phone }); pageCustomers(); }
+    const v = await formDialog('عميل جديد', [
+      { key: 'name', label: 'اسم العميل' },
+      { key: 'phone', label: 'التليفون (اختياري)', type: 'tel' },
+    ]);
+    if (!v || !v.name) return;
+    try { await rpc('rpc_create_customer', { p_name: v.name, p_phone: v.phone || null }); pageCustomers(); }
     catch (e) { alert(humanError(e)); }
   };
 }

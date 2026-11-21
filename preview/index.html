@@ -222,6 +222,16 @@ body.auth-locked .topbar,body.auth-locked .tabbar{display:none}
 <nav class="tabbar" id="tabbar"></nav>
 <script src="/config.js"></script>
 <script src="/db.js"></script>
-<script src="/app.js?v=26"></script>
+<script src="/app.js?v=27"></script>
+<script>
+  // التسجيل بعد load عشان مايتنافسش مع تحميل الواجهة.
+  if ('serviceWorker' in navigator) {
+    addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // الفشل مش قاتل: التطبيق بيشتغل عادي، بس من غير offline.
+      });
+    });
+  }
+</script>
 </body>
 </html>

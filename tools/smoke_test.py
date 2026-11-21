@@ -65,6 +65,18 @@ def main():
     status, body = get(base + "/healthz")
     check("/healthz returns ok", status == 200 and body.strip() == "ok", f"status={status}")
 
+    # The service worker is what makes the app open offline. If it 404s the
+    # browser silently degrades to online-only, so check it explicitly.
+    status, sw = get(base + "/sw.js")
+    check("/sw.js is served", status == 200, f"status={status}")
+    if status == 200:
+        check("/sw.js never caches cross-origin API calls",
+              "url.origin !== self.location.origin" in sw,
+              "missing the same-origin guard")
+        check("/sw.js ignores query strings when caching",
+              "pathname" in sw and "keyOf" in sw,
+              "cache key must drop ?v= or offline lookups miss")
+
     status, config = get(base + "/config.js")
     ok = status == 200
     check("/config.js is served", ok, f"status={status}")
