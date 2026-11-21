@@ -2,13 +2,10 @@
 // The service-role key exists only in the Edge Function environment (injected by Supabase). Never in the browser.
 // Login identity: username -> "<username>@factory.internal" (no real mailbox needed; signups must be disabled).
 //
-// Error codes are the same E_* keys the client maps to Arabic in app.js ERRORS,
-// so a failure here reads as a sentence rather than a raw English string.
+// أكواد الأخطاء هنا هي نفس المفاتيح اللي الواجهة بتحولها لرسائل عربية.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
-// The browser sends apikey plus authorization, and its preflight asks for both.
-// Leaving apikey out makes the preflight fail, which the browser reports as a
-// dead network connection rather than a server error.
+// المتصفح بيبعت apikey وauthorization؛ لازم نسمح بالاتنين عشان طلب الفحص المسبق ما يفشلش.
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -46,8 +43,7 @@ Deno.serve(async (req) => {
     email: `${username}@factory.internal`, password, email_confirm: true,
   });
   if (ce || !created.user) {
-    /* Supabase reports an address that already exists in a free-text message, so
-       the mapping has to look at the text, not at a code. */
+    /* Supabase بيرجع تكرار البريد في رسالة نصية، فبنحدد الكود من نص الرسالة. */
     const msg = String(ce?.message ?? "");
     const code = /already|exists|registered/i.test(msg) ? "E_USERNAME_TAKEN" : "E_USER_CREATE_FAILED";
     return json({ error: code }, 400);
@@ -60,8 +56,7 @@ Deno.serve(async (req) => {
   });
   if (re) {                                   // compensate: do not leave an orphan auth user
     await admin.auth.admin.deleteUser(created.user.id);
-    /* The RPC raises E_* codes itself; anything else is unexpected and would be
-       shown as a bare code, so it becomes a generic failure. */
+    /* لو الـ RPC ما رجّعش كود E_* معروف، بنعرض رسالة عامة بدل تفاصيل داخلية. */
     const code = /^E_[A-Z_]+/.test(String(re.message)) ? String(re.message).split(/[\s|]/)[0] : "E_USER_CREATE_FAILED";
     return json({ error: code }, 400);
   }
