@@ -44,12 +44,25 @@ jobs:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ -n "$TOKEN" ] && [ -n "$ACCOUNT" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
+          if [ -z "$TOKEN" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set — skipping the deploy."
+            echo "::warning::CLOUDFLARE_API_TOKEN is not set — skipping the deploy."
+            exit 0
           fi
+          # The token knows which accounts it can reach, so the account id only
+          # has to be set by hand when the token spans more than one account.
+          if [ -z "$ACCOUNT" ]; then
+            ACCOUNT=$(curl -sS -H "Authorization: Bearer $TOKEN" \
+              https://api.cloudflare.com/client/v4/accounts \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin).get("result") or []; print(d[0]["id"] if len(d)==1 else "")')
+          fi
+          if [ -z "$ACCOUNT" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not determine the Cloudflare account — set CLOUDFLARE_ACCOUNT_ID."
+            exit 0
+          fi
+          echo "account=$ACCOUNT" >> "$GITHUB_OUTPUT"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Deploy
         id: deploy
@@ -57,7 +70,7 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ steps.creds.outputs.account }}
           command: >-
             pages deploy dist
             --project-name garment-factory
