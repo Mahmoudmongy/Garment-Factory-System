@@ -7,7 +7,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test:db": "bash tools/run_db_tests_local.sh",
-    "check:sql": "python3 tools/static_sql_check.py"
+    "check:sql": "python3 tools/static_sql_check.py",
+    "check:maps": "python3 tools/check_code_maps.py"
   },
   "engines": {
     "node": ">=20"
