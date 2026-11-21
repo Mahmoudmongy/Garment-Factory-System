@@ -158,6 +158,18 @@ A phase is only closed after its tests pass. Every deferred item is stated, ever
   وسباق التكرار (إدراج واحد + 9 `replayed`).
 - `tools/static_sql_check.py`: 19 ملف، 47 دالة، 31 كود خطأ، بلا مشاكل.
 
+### جلسة 2026-11-20 — تنظيف الحوارات وإصلاح CI
+
+- **`formDialog`**: نوع حقل `select` (`options` + `value`) للاختيار من قائمة مغلقة.
+- **`editUser`**: حالة الحساب بقت قائمة منسدلة «شغّال / موقوف» بدل ما المستخدم
+  يكتب `1` أو `0` في مربع نص — كان ده أسوأ من `prompt()` اللي اتشال.
+- **`pickRoles` و`editPermissions`**: مفتاح Escape بيقفل، والـ mask بياخد التركيز
+  عشان مستمع `keydown` يشتغل فعلاً.
+- **`.github/workflows/deploy-cloudflare.yml`**: خطوة النشر بتتخطى نفسها لو
+  `CLOUDFLARE_API_TOKEN` مش مضاف، بدل ما الـ PR يطلع فاشل. الـ CI رجع **success**.
+- **تحقق في المتصفح**: التحقق العربي بيوقف الحفظ، القيم بترجع trimmed، Escape
+  بيرجّع `null`، والقائمة المنسدلة بترجّع القيمة الافتراضية الصح.
+
 ### في هذه الجلسة
 - **`0013_master_data_writes.sql`**: إضافة `rpc_create_account`, `rpc_update_account`,
   `rpc_update_item`, `rpc_update_warehouse`, `rpc_update_machine`, `rpc_update_employee`.
