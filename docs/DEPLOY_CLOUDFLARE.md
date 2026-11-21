@@ -72,6 +72,25 @@ bash tools/deploy-cloudflare.sh
 **مهم:** التوكن ده بيدير حسابك عند Cloudflare. متحطّهوش في الريبو ولا في
 أي ملف متعقّب في git — secret في البيئة بس.
 
+## النشر — الطريقة الثالثة: GitHub Actions (المفضّلة)
+
+بعد ما تحط الـ secrets، كل push على `main` بينشر لوحده. مفيش توكن على جهاز
+حد، ومفيش خطوة يدوية تنسى تعملها.
+
+**الـ secrets المطلوبة** — Settings → Secrets and variables → Actions:
+
+| الاسم | القيمة |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | التوكن (صلاحية Cloudflare Pages: Edit) |
+| `CLOUDFLARE_ACCOUNT_ID` | `d6d9e923e57e3b039156162fc231617e` |
+
+الـ workflow في `.github/workflows/deploy-cloudflare.yml` بيعمل:
+`npm ci` → `npm run build` → فحص SQL → رفع → `smoke_test.py` على الرابط
+المنشور. لو الفحص فشل، الـ job بيفشل — يعني النشر المكسور بيبان أحمر،
+مش أخضر.
+
+كل pull request بيطلع رابط معاينة منفصل، فتقدر تجرب قبل الدمج.
+
 ## التحقق بعد النشر
 
 الـ `/healthz` هنا ملف ثابت بيرجع `ok`، فهو **مش** بيفحص Supabase. النشر

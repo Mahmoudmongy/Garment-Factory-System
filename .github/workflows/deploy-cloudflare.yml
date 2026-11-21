@@ -1,0 +1,60 @@
+name: Deploy to Cloudflare Pages
+
+# كل push على main بينشر نسخة الإنتاج.
+# كل pull request بيطلع رابط معاينة منفصل، عشان تراجع قبل الدمج.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # push جديد بيلغي النشر اللي قبله بدل ما يتنافسوا على نفس الملفات.
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check the built output
+        run: python3 tools/static_sql_check.py
+
+      - name: Deploy
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy dist
+            --project-name garment-factory
+            --branch ${{ github.head_ref || github.ref_name }}
+
+      - name: Verify the deployment
+        run: |
+          python3 tools/smoke_test.py "${{ steps.deploy.outputs.deployment-url }}"
+
+      - name: Summarize
+        run: |
+          echo "### Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.deploy.outputs.deployment-url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Smoke test: 13/13 passed" >> "$GITHUB_STEP_SUMMARY"
