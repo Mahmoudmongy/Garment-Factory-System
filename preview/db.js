@@ -55,10 +55,10 @@
     if (text) { try { body = JSON.parse(text); } catch (e) { body = text; } }
     if (!res.ok) {
       const apiError = body && typeof body.error === 'string' ? body.error : '';
-      if (/^E_[A-Z_]+(?:[|\\s]|$)/.test(apiError)) {
+      if (/^E_[A-Z_]+(?:[|\s]|$)/.test(apiError)) {
         const err = new Error(apiError);
         err.status = res.status;
-        err.code = apiError.split(/[|\\s]/)[0];
+        err.code = apiError.split(/[|\s]/)[0];
         throw err;
       }
       const msg = (body && (body.message || body.error_description || body.hint || body.error)) || ('HTTP ' + res.status);
