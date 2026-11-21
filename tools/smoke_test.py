@@ -17,20 +17,28 @@ are needed — the key is read from the deployed /config.js, which is public by 
 import json
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
 TIMEOUT = 20
+
+# Cloudflare بيفضل يرجّع 522 لحوالي نصف دقيقة بعد النشر لحد ما المسار الجديد
+# ينتشر على الـ edge. الفحص كان بيحاول مرة واحدة، فالنشر السليم كان بيطلع أحمر.
+# الأكواد دي معناها "المسار لسه مش جاهز" مش "الموقع واقع"، فبتستاهل إعادة محاولة.
+TRANSIENT = {0, 408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+RETRIES = 6
+BACKOFF = 5.0
 
 # Cloudflare بيحجب User-Agent بتاع Python (بيرجع 403)، فالفحص بيبان فاشل
 # والموقع سليم. الهيدر ده بيخلّي الطلب يبان زي متصفح عادي.
 UA = "Mozilla/5.0 (compatible; garment-factory-smoke-test/1.0)"
 
 
-def get(url, headers=None):
+def _attempt(url, data=None, headers=None, method=None):
     hdrs = {"User-Agent": UA}
     hdrs.update(headers or {})
-    req = urllib.request.Request(url, headers=hdrs)
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
             return res.status, res.read().decode("utf-8", "replace")
@@ -38,20 +46,29 @@ def get(url, headers=None):
         return exc.code, exc.read().decode("utf-8", "replace")
     except urllib.error.URLError as exc:
         return 0, str(exc.reason)
+
+
+def _with_retry(url, data=None, headers=None, method=None):
+    """Retries only the statuses that mean "not ready yet", never a real answer."""
+    status, body = _attempt(url, data, headers, method)
+    for n in range(RETRIES):
+        if status not in TRANSIENT:
+            return status, body
+        wait = BACKOFF * (n + 1)
+        print(f"        retry {n + 1}/{RETRIES} in {wait:.0f}s — {url} returned {status or 'no response'}")
+        time.sleep(wait)
+        status, body = _attempt(url, data, headers, method)
+    return status, body
+
+
+def get(url, headers=None):
+    return _with_retry(url, headers=headers)
 
 
 def post(url, payload, headers=None):
-    data = json.dumps(payload).encode()
-    hdrs = {"Content-Type": "application/json", "User-Agent": UA}
+    hdrs = {"Content-Type": "application/json"}
     hdrs.update(headers or {})
-    req = urllib.request.Request(url, data=data, method="POST", headers=hdrs)
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
-            return res.status, res.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", "replace")
-    except urllib.error.URLError as exc:
-        return 0, str(exc.reason)
+    return _with_retry(url, data=json.dumps(payload).encode(), headers=hdrs, method="POST")
 
 
 def main():
