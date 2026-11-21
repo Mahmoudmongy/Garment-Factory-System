@@ -66,3 +66,15 @@ See `2026-11-20.md` for detail and the traps that cost time.
   written over a direct DB connection, not from the client.
 - Run locally: `printf 'SUPABASE_URL=...\nSUPABASE_PUBLISHABLE_KEY=...\nPORT=12000\n' > .env.runtime`
   then `set -a && . ./.env.runtime && set +a && node server.js`. `.env.runtime` is gitignored.
+
+## Traps learned 2026-11-20
+- `humanError()` maps a CORS/preflight failure to "السرفر مش راد", so a missing
+  Edge Function is indistinguishable from a network outage. Compare `OPTIONS`
+  against `/auth/v1/token` (a known-good endpoint) to tell them apart.
+- User creation needs the Admin API or an Edge Function with the service-role
+  key. Never from the browser, never by inserting into `auth.users` by hand.
+- `formDialog` fields use `{ key, label }`, not `{ name, label }`.
+- `rpc_save_stage_template` deletes and re-inserts every stage, so any partial
+  save must resend the whole list including `is_final`/`is_operations`.
+- Test the UI with no credentials by stubbing `window.OB` and running the real
+  `app.js` under jsdom (`npm i jsdom --no-save` outside the repo).
