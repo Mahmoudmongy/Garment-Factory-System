@@ -54,7 +54,14 @@
     let body = null;
     if (text) { try { body = JSON.parse(text); } catch (e) { body = text; } }
     if (!res.ok) {
-      const msg = (body && (body.message || body.error_description || body.hint)) || ('HTTP ' + res.status);
+      const apiError = body && typeof body.error === 'string' ? body.error : '';
+      if (/^E_[A-Z_]+(?:[|\\s]|$)/.test(apiError)) {
+        const err = new Error(apiError);
+        err.status = res.status;
+        err.code = apiError.split(/[|\\s]/)[0];
+        throw err;
+      }
+      const msg = (body && (body.message || body.error_description || body.hint || body.error)) || ('HTTP ' + res.status);
       const err = new Error(body && body.code ? body.code + '|' + msg : msg);
       err.status = res.status;
       err.code = body && body.code;
