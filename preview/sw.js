@@ -5,7 +5,7 @@
    لازم تيجي من الشبكة دايماً، والكاش هنا للواجهة بس (HTML/JS/CSS).
    لو كاشّينا ردود الـ API، المستخدم كان هيشوف أرقام قديمة ويحسب عليها. */
 
-const VERSION = 'v2';
+const VERSION = 'v6';
 const SHELL = `factory-shell-${VERSION}`;
 const KEEP = [SHELL];
 

@@ -86,7 +86,7 @@
   /* الجداول المسموح بقراءتها مباشرة (نفس القائمة البيضاء بتاعة السيرفر المحلي). */
   const TABLES = new Set([
     'operational_codes', 'work_assignments', 'deliveries', 'delivery_lines',
-    'customer_returns', 'customer_fabric_movements', 'stage_templates',
+    'customer_returns', 'customer_fabric_movements', 'cut_lines', 'stage_templates',
     'stage_template_stages', 'items', 'warehouses', 'inventory_transactions',
     'machines', 'machine_maintenance', 'audit_log', 'expenses',
     'financial_transactions', 'employees', 'employee_pay_terms', 'profiles',
@@ -96,7 +96,7 @@
   const FILTER_COLS = new Set([
     'order_id', 'customer_id', 'bundle_id', 'employee_id', 'template_id',
     'delivery_id', 'machine_id', 'item_id', 'warehouse_id', 'code',
-    'assignment_id', 'stage_code',
+    'assignment_id', 'stage_code', 'production_order_id',
   ]);
 
   /* الفلاتر المسموحة بس، وبصيغة PostgREST (eq.). */

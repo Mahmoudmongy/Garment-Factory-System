@@ -11,6 +11,9 @@ const app = $('#app');
 
 /* ---------------------------------------------------------------- تنسيق */
 const money = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ج.م';
+/* نفس تنسيق المرجع: الرقم LTR ثابت العرض، والعملة أصغر منه (0.62em). */
+const amount = (v) => `<span class="num">${Number(v || 0).toLocaleString('en-US',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><span class="cur">ج.م</span>`;
 const num = (v) => Number(v || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -20,6 +23,30 @@ const dateAr = (d) => {
   if (isNaN(x)) return '—';
   return `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
 };
+
+/* وقت واسم جدول بالعربي — سجل التعديلات بيعرضهم للمستخدم مش للمطوّر. */
+const tsAr = (d) => {
+  if (!d) return '—';
+  const x = new Date(String(d));
+  if (isNaN(x)) return '—';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${dateAr(d)}, ${p(x.getHours())}:${p(x.getMinutes())}`;
+};
+
+const TABLE_AR = {
+  production_orders: 'أمر تشغيل', order_stages: 'مرحلة أمر', stage_templates: 'قالب مراحل',
+  stage_template_stages: 'مرحلة قالب', cut_lines: 'قص', bundles: 'شنطة', bundle_colors: 'bundle_colors',
+  work_assignments: 'استلام شغل', deliveries: 'إذن تسليم', delivery_lines: 'تسليم شغل',
+  customer_returns: 'مرتجع', customers: 'عميل', customer_fabric_movements: 'قماش',
+  customer_supply_receipts: 'استلام مستلزمات', customer_supply_issues: 'صرف مستلزمات',
+  items: 'صنف', warehouses: 'مخزن', inventory_transactions: 'حركة مخزن',
+  machines: 'ماكينة', machine_maintenance: 'صيانة', expenses: 'مصروف',
+  financial_transactions: 'حركة خزنة', employees: 'موظف', employee_pay_terms: 'حساب صنايعي',
+  profiles: 'مستخدم', roles: 'دور', permissions: 'صلاحية', role_permissions: 'صلاحية دور',
+  user_roles: 'دور مستخدم', user_permissions: 'صلاحية مستخدم', company_settings: 'إعدادات',
+  rejection_reasons: 'سبب رفض', operational_codes: 'أكواد تشغيل',
+};
+const tableAr = (t) => TABLE_AR[t] || t;
 
 /* ---------------------------------------------------------------- API */
 /* التنفيذ في db.js — بيضرب Supabase مباشرة بجلسة المستخدم. */
@@ -37,6 +64,9 @@ const ERRORS = {
   E_WHOLE_PIECES: 'القطع لازم تكون أعداد صحيحة', E_COLOUR_REQUIRED: 'اكتب اللون',
   E_COLOUR_SIZE_REQUIRED: 'اللون والمقاس مطلوبين', E_NOTHING_TO_CUT: 'مفيش كميات للقص',
   E_OVER_CUT: 'الكمية أكبر من الباقي في الأمر', E_ORDER_NOT_OPEN: 'الأمر مش مفتوح',
+  E_ORDER_NOT_FINISHED: 'لسه فيه قطع ما خلصتش — اقفل الأمر بعد ما كل الشنط تخلص',
+  E_FABRIC_SHORT: 'الرصيد مش كفاية — راجع أمتار العميل للون ده',
+  E_STAGE_LOCKED: 'المرحلة دي بدأت خلاص — سعرها مش بيتعدّل بعد ما الشغل اتسجّل عليها',
   E_USERNAME_REQUIRED: 'اكتب اسم المستخدم', E_USERNAME_TAKEN: 'اسم المستخدم ده محجوز',
   E_USERNAME_INVALID: 'اسم المستخدم لازم ٣ حروف على الأقل، حروف إنجليزي صغيرة وأرقام و . _ - بس',
   E_EMPLOYEE_HAS_LOGIN: 'الصنايعي ده ليه حساب دخول بالفعل',
@@ -53,6 +83,7 @@ const ERRORS = {
   E_ALREADY_REVERSAL: 'دي عملية عكس ومينفعش تتعكس', E_CUSTOMER_NOT_FOUND: 'العميل مش موجود',
   E_OVER_DELIVERY: 'الكمية أكبر من الجاهز للتسليم', E_ORDER_REQUIRED: 'اختار الأمر',
   E_OVER_ISSUE: 'الكمية أكبر من المتاح في المخزن',
+  E_CUSTOMER_EXISTS: 'العميل ده متسجّل قبل كده — نفس الاسم أو نفس التليفون',
 };
 const humanError = (e) => {
   /* fetch بيرمي TypeError من غير أي كود لما الشبكة تقطع. الرسالة الخام
@@ -69,31 +100,31 @@ const humanError = (e) => {
 /* ---------------------------------------------------------------- القائمة */
 const NAV = [
   { group: 'الشغل اليومي', items: [
-    { key: 'home', label: 'الرئيسية', icon: '🏠' },
-    { key: 'foreman', label: 'رئيس العمال', icon: '📦', perm: 'production.assignment.create' },
-    { key: 'orders', label: 'أوامر التشغيل', icon: '🧵', perm: 'production.order.view' },
-    { key: 'warehouse', label: 'المخزن', icon: '🏬', perm: 'inventory.view' },
-    { key: 'help', label: 'المساعدة', icon: '❓' },
+    { key: 'home', label: 'الرئيسية', icon: 'home' },
+    { key: 'foreman', label: 'رئيس العمال', icon: 'package', perm: 'production.assignment.create' },
+    { key: 'orders', label: 'أوامر التشغيل', icon: 'scissors', perm: 'production.order.view' },
+    { key: 'warehouse', label: 'المخزن', icon: 'store', perm: 'inventory.view' },
+    { key: 'help', label: 'المساعدة', icon: 'help' },
   ]},
   { group: 'الحسابات', items: [
-    { key: 'customers', label: 'العملاء', icon: '👥', perm: 'customer.view' },
-    { key: 'workers', label: 'الصنايعية والحسابات', icon: '🧑‍🏭', perm: 'employee.view' },
-    { key: 'accounts', label: 'الخزنة والبنوك', icon: '💰', perm: 'account.view' },
-    { key: 'expenses', label: 'المصروفات', icon: '🧾', perm: 'expense.view' },
-    { key: 'supplies', label: 'المستلزمات', icon: '🪡', perm: 'inventory.view' },
+    { key: 'customers', label: 'العملاء', icon: 'users', perm: 'customer.view' },
+    { key: 'workers', label: 'الصنايعية والحسابات', icon: 'worker', perm: 'employee.view' },
+    { key: 'accounts', label: 'الخزنة والبنوك', icon: 'wallet', perm: 'account.view' },
+    { key: 'expenses', label: 'المصروفات', icon: 'receipt', perm: 'expense.view' },
+    { key: 'supplies', label: 'المستلزمات', icon: 'supplies', perm: 'inventory.view' },
   ]},
   { group: 'الإدارة', items: [
-    { key: 'machines', label: 'الماكينات', icon: '⚙️', perm: 'machine.view' },
-    { key: 'analytics', label: 'لوحة المدير', icon: '📊', perm: 'reports.view' },
-    { key: 'reports', label: 'التقارير', icon: '📄', perm: 'reports.view' },
-    { key: 'users', label: 'المستخدمون والصلاحيات', icon: '🔐', perm: 'system.user.manage' },
-    { key: 'import', label: 'استيراد البيانات', icon: '⬆️', perm: 'system.user.manage' },
-    { key: 'audit', label: 'سجل التعديلات', icon: '🕘', perm: 'audit.view' },
+    { key: 'machines', label: 'الماكينات', icon: 'cog', perm: 'machine.view' },
+    { key: 'analytics', label: 'لوحة المدير', icon: 'chart', perm: 'reports.view' },
+    { key: 'reports', label: 'التقارير', icon: 'file', perm: 'reports.view' },
+    { key: 'users', label: 'المستخدمون والصلاحيات', icon: 'lock', perm: 'system.user.manage' },
+    { key: 'import', label: 'استيراد البيانات', icon: 'upload', perm: 'system.user.manage' },
+    { key: 'audit', label: 'سجل التعديلات', icon: 'history', perm: 'audit.view' },
   ]},
 ];
 const TABS = [
-  ['home', 'الرئيسية', '🏠'], ['foreman', 'التسليم', '📦'],
-  ['orders', 'الأوامر', '🧵'], ['customers', 'العملاء', '👥'], ['more', 'المزيد', '☰'],
+  ['home', 'الرئيسية', 'home'], ['foreman', 'التسليم', 'package'],
+  ['orders', 'الأوامر', 'scissors'], ['customers', 'العملاء', 'users'], ['more', 'المزيد', 'menu'],
 ];
 
 let PROFILE = null;
@@ -126,7 +157,7 @@ function renderShell(activeKey) {
       return `<div class="sb-group">${esc(g.group)}</div>
       ${items.map((i) => `
         <a class="sb-link${i.key === activeKey ? ' active' : ''}" href="#${i.key}">
-          <span class="ico">${i.icon}</span>${esc(i.label)}
+          ${icon(i.icon)}${esc(i.label)}
         </a>`).join('')}`;
     }).join('')}
     <div class="sb-foot">
@@ -135,12 +166,12 @@ function renderShell(activeKey) {
         <div class="sb-user">${esc(PROFILE?.display_name || 'المدير')}</div>
         <div class="sb-role">${esc(PROFILE?.is_superuser ? 'مدير النظام' : 'مستخدم')}</div>
       </div>
-      <button class="sb-out" id="sbOut" title="خروج">خروج</button>
+      <button class="sb-out" id="sbOut" title="خروج">${icon('logout', 15)}</button>
     </div>`;
 
-  $('#tabbar').innerHTML = TABS.map(([k, label, icon]) =>
+  $('#tabbar').innerHTML = TABS.map(([k, label, ic]) =>
     `<button data-go="${k}" class="${k === activeKey ? 'active' : ''}">
-       <span>${icon}</span>${label}</button>`).join('');
+       ${icon(ic, 20)}${label}</button>`).join('');
 
   const out = $('#sbOut');
   if (out) out.onclick = signOut;
@@ -165,9 +196,9 @@ function renderLogin() {
     <div class="login-wrap">
       <form class="login-card" id="loginForm" autocomplete="on">
         <div class="login-brand">
-          <div class="login-logo">🧵</div>
+          <div class="login-logo">${icon('scissors', 28)}</div>
           <h1>نظام المصنع</h1>
-          <p>إدارة تشغيل المصنع — دخول الموظفين</p>
+          <p>سجّل دخولك عشان تكمّل</p>
         </div>
         <label for="lgUser">اسم المستخدم</label>
         <input id="lgUser" name="username" autocapitalize="none" autocorrect="off"
@@ -210,14 +241,21 @@ function renderLogin() {
 }
 
 /* ---------------------------------------------------------------- عناصر */
-function tbl(cols, rows, emptyText) {
-  if (!rows || !rows.length) return `<div class="empty">${esc(emptyText || 'مفيش بيانات')}</div>`;
+function tbl(cols, rows, emptyText, emptyIcon, foot) {
+  if (!rows || !rows.length) {
+    return emptyIcon
+      ? emptyState(emptyIcon, emptyText || 'مفيش بيانات')
+      : `<div class="empty">${esc(emptyText || 'مفيش بيانات')}</div>`;
+  }
   return `<div class="tbl-wrap"><table>
     <thead><tr>${cols.map((c) => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((r) => `<tr>${cols.map((c) => {
       const v = c.render ? c.render(r) : esc(r[c.key] == null ? '—' : r[c.key]);
       return `<td class="${c.num ? 'num' : ''}${c.wrap ? ' wrap' : ''}">${v}</td>`;
-    }).join('')}</tr>`).join('')}</tbody></table></div>`;
+    }).join('')}</tr>`).join('')}</tbody>
+    ${foot && foot.length ? `<tfoot>${foot.map((cells) => `<tr>${cells.map((v, i) =>
+      `<td class="${cols[i] && cols[i].num ? 'num' : ''}">${v}</td>`).join('')}</tr>`).join('')}</tfoot>` : ''}
+  </table></div>`;
 }
 
 /* Stage codes live in the DB; the UI always speaks Arabic. */
@@ -321,8 +359,150 @@ const TXN_CATEGORIES = {
   other: 'أخرى',
 };
 const txnCategoryAr = (c) => (c ? (TXN_CATEGORIES[c] || c) : '—');
+/* بنود مصروفات المصنع زي المرجع — بتتستخدم كاقتراحات في الفلتر والفورم. */
+const EXPENSE_CATS = ['كهربا', 'مياه', 'إيجار', 'صيانة', 'نقل وشحن',
+  'مرتبات إدارية', 'بوفيه ونظافة', 'أخرى'];
 const categoryOptions = (selected) => Object.entries(TXN_CATEGORIES).map(([k, v]) =>
   `<option value="${k}"${k === selected ? ' selected' : ''}>${v}</option>`).join('');
+/* ---------------------------------------------------------------- أيقونات */
+/* مسارات بنفس نمط المرجع (خطوط 24×24، سماكة 1.75، أطراف مدوّرة).
+   الإيموجي بتختلف من جهاز لجهاز وبتطلع ملوّنة وسط واجهة هادية — الخطوط
+   بتاخد اللون من النص، فبتشتغل مع الحالات (نشط/موقوف) من غير كود زيادة. */
+const ICONS = {
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M9.5 20v-5.5h5V20"/>',
+  package: '<path d="M12 2.8 20.5 7v10L12 21.2 3.5 17V7z"/><path d="M3.5 7 12 11.2 20.5 7"/><path d="M12 11.2v10"/>',
+  scissors: '<circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><path d="M8.1 8.1 20 20M8.1 15.9 20 4"/>',
+  store: '<path d="M3.5 9.5V20h17V9.5"/><path d="M2 9.5 4.5 4h15L22 9.5a3 3 0 0 1-5 1 3 3 0 0 1-5 0 3 3 0 0 1-5 0 3 3 0 0 1-5-1z"/><path d="M9.5 20v-6h5v6"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.6 2.6 0 1 1 3.4 2.5c-.6.2-.9.8-.9 1.4v.4"/><path d="M12 17.2h.01"/>',
+  users: '<circle cx="9" cy="8" r="3.2"/><path d="M2.8 20c0-3.4 2.8-5.6 6.2-5.6s6.2 2.2 6.2 5.6"/><path d="M16.5 5.2a3.2 3.2 0 0 1 0 6.1"/><path d="M17.8 14.6c2.1.5 3.4 2.1 3.4 4.4"/>',
+  worker: '<path d="M4 13a8 8 0 0 1 16 0"/><path d="M2.8 13h18.4"/><path d="M9.5 13v3.5a2.5 2.5 0 0 0 5 0V13"/><path d="M12 5V3.2"/>',
+  wallet: '<path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h11.5A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19H6a2.5 2.5 0 0 1-2.5-2.5z"/><path d="M3.5 9.5h17"/><circle cx="16.5" cy="14" r="1.1"/>',
+  receipt: '<path d="M5.5 3h13v18l-2.2-1.6-2.2 1.6-2.1-1.6-2.2 1.6-2.1-1.6L5.5 21z"/><path d="M9 8h6M9 12h6M9 16h3.5"/>',
+  supplies: '<path d="M8.5 3.5h7v3h-7z"/><path d="M6 6.5h12v14H6z"/><path d="M10 11.5h4M12 9.5v4"/>',
+  cog: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.6 7.2l2 1.2M17.4 15.6l2 1.2M4.6 16.8l2-1.2M17.4 8.4l2-1.2"/>',
+  chart: '<path d="M4 20V4"/><path d="M4 20h16"/><path d="M8.5 20v-6.5M13 20V8.5M17.5 20v-9.5"/>',
+  file: '<path d="M6 3h7.5L19 8.5V21H6z"/><path d="M13.5 3v5.5H19"/><path d="M9.5 13h7M9.5 16.5h4.5"/>',
+  lock: '<rect x="4.5" y="10.5" width="15" height="10.5" rx="2"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/><path d="M12 15v2.2"/>',
+  upload: '<path d="M12 16.5V4.5"/><path d="M7.5 9 12 4.5 16.5 9"/><path d="M4.5 15v4.5h15V15"/>',
+  history: '<path d="M3.8 12a8.2 8.2 0 1 0 2.5-5.9"/><path d="M3.5 4v4.2h4.2"/><path d="M12 8v4.4l3.2 1.9"/>',
+  camera: '<path d="M3.5 8.5h3l1.6-2.4h7.8L17.5 8.5h3v11h-17z"/><circle cx="12" cy="14" r="3.4"/>',
+  printer: '<path d="M7 8.5V3.5h10v5"/><rect x="3.5" y="8.5" width="17" height="7.5" rx="2"/><path d="M7 16h10v4.5H7z"/>',
+  tag: '<path d="M12.6 3.2H21v8.4l-9.2 9.2-8.4-8.4z"/><circle cx="16.8" cy="7.2" r="1.3"/>',
+  pencil: '<path d="M4 20h4L20 8l-4-4L4 16z"/><path d="M14.5 5.5 18.5 9.5"/>',
+  return: '<path d="M9 5.5 4.5 10 9 14.5"/><path d="M4.5 10h9.5a5 5 0 0 1 0 10H11"/>',
+  check: '<path d="M4.5 12.5 9.5 17.5 19.5 6.5"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4 20.5 20.5"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  alert: '<path d="M12 3.5 21.5 20.5h-19z"/><path d="M12 9.5v4.6"/><path d="M12 17.4h.01"/>',
+  truck: '<path d="M2.5 6.5h10.5v10H2.5z"/><path d="M13 10h4l3 3v3.5h-7z"/><circle cx="6.5" cy="18.5" r="1.8"/><circle cx="16.5" cy="18.5" r="1.8"/>',
+  chevron: '<path d="M14.5 6 8.5 12l6 6"/>',
+  arrow: '<path d="M20 12H4.5"/><path d="M10 5.5 4 12l6 6.5"/>',
+  logout: '<path d="M9.5 4.5H5v15h4.5"/><path d="M14 8l4 4-4 4"/><path d="M18 12H9.5"/>',
+  barcode: '<path d="M3.5 5.5v13M6.5 5.5v13M10 5.5v13M13.5 5.5v13M16.5 5.5v13M20.5 5.5v13"/>',
+  box: '<path d="M4 7.5 12 3.5l8 4v9l-8 4-8-4z"/><path d="M4 7.5 12 11.5l8-4"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/>',
+};
+
+/* أيقونة داخل النص: بترث الحجم من حجم الخط لو مفيش مقاس. */
+const icon = (name, size) => {
+  const d = ICONS[name] || ICONS.box;
+  return `<svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+    ${size ? `style="width:${size}px;height:${size}px"` : ''} aria-hidden="true">${d}</svg>`;
+};
+
+/* زر بأيقونة في الأول. الأيقونة لوحدها مش مفهومة، والنص لوحده مش سريع —
+   الاتنين مع بعض. */
+const btnIcon = (name, label, cls) => `<span class="ico-svg-wrap">${icon(name, 18)}</span>${esc(label)}`;
+
+/* رأس صفحة موحّد: العنوان والشروح على اليمين، الأزرار على الشمال. */
+const pageHead = (title, sub, actions) => `
+  <div class="phead">
+    <div><h1>${esc(title)}</h1>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>
+    ${actions ? `<div class="phead-acts">${actions}</div>` : ''}
+  </div>`;
+
+/* حالة الفراغ بتيقول للمستخدم يعمل إيه، مش بس إن مفيش بيانات. */
+const emptyState = (iconName, title, hint) => `
+  <div class="empty">
+    <div class="empty-ico">${icon(iconName, 22)}</div>
+    <div><b>${esc(title)}</b></div>
+    ${hint ? `<div class="hint" style="margin-top:4px">${esc(hint)}</div>` : ''}
+  </div>`;
+
+/* فلتر مقسّم زي المرجع: خيار واحد ظاهر كنشط. */
+const segFilter = (name, options, active) => `
+  <div class="seg" role="group">
+    ${options.map(([k, label]) => `<button data-seg="${esc(name)}" data-val="${esc(k)}"
+      aria-pressed="${k === active}">${esc(label)}</button>`).join('')}
+  </div>`;
+
+/* بيربط كل أزرار الفلتر اللي في الصفحة الحالية بمستدعى واحد. */
+const bindSeg = (name, onChange) => {
+  app.querySelectorAll(`[data-seg="${name}"]`).forEach((b) => {
+    b.onclick = () => onChange(b.dataset.val);
+  });
+};
+
+/* هيكل عظمي بشكل الصفحة اللي جاية، عشان ما يحصلش قفزة في التخطيط. */
+const skeleton = (kind) => {
+  if (kind === 'cards') {
+    return `<div class="grid g4">${'<div class="skel" style="height:78px;border-radius:.75rem"></div>'.repeat(4)}</div>`;
+  }
+  const rows = '<div class="skel skel-line"></div>'.repeat(6);
+  return `<div class="card"><div class="skel skel-line" style="width:35%;height:16px"></div>
+    <div style="margin-top:14px">${rows}</div></div>`;
+};
+
+/* ---------------------------------------------------------------- تنبيهات */
+/* alert() بيقفل الواجهة كلها ويبان إنه بتاع المتصفح مش بتاع التطبيق.
+   التنبيه الجانبي بيمشي مع باقي الواجهة، وبيختفي لوحده. */
+function toast(message, kind) {
+  let box = $('#toasts');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'toasts';
+    box.className = 'toasts';
+    box.setAttribute('role', 'status');
+    box.setAttribute('aria-live', 'polite');
+    document.body.appendChild(box);
+  }
+  const t = document.createElement('div');
+  t.className = `toast toast-${kind || 'ok'}`;
+  t.innerHTML = `<span class="toast-ico">${icon(kind === 'err' ? 'alert' : 'check', 16)}</span>
+    <span>${esc(message)}</span>`;
+  box.appendChild(t);
+
+  const close = () => {
+    t.classList.add('toast-out');
+    setTimeout(() => t.remove(), 200);
+  };
+  t.onclick = close;
+  setTimeout(close, kind === 'err' ? 6500 : 3800);
+}
+
+/* نفس توقيع alert عشان الاستبدال يبقى ميكانيكي وآمن. */
+const notify = (msg) => toast(msg, 'ok');
+const notifyErr = (msg) => toast(msg, 'err');
+
+/* الزرار بيقفل نفسه وقت الإرسال عشان الضغط مرتين مايعملش عمليتين. */
+async function withBusy(btn, label, fn) {
+  if (!btn) return fn();
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  if (label) btn.innerHTML = `<span class="spin"></span>${esc(label)}`;
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    btn.innerHTML = original;
+  }
+}
+
 const chip = (s) => {
   const [cls, label] = STATUS[s] || ['chip-idle', s || '—'];
   return `<span class="chip ${cls}">${esc(label)}</span>`;
@@ -454,7 +634,7 @@ function barcodeSVG(text, opts) {
 function printDoc(title, bodyHtml, opts) {
   const o = Object.assign({ back: '#f8f8f6' }, opts || {});
   const w = window.open('', '_blank');
-  if (!w) { alert('المتصفح منع فتح النافذة — اسمح بالنوافذ المنبثقة عشان تطبع'); return; }
+  if (!w) { notify('المتصفح منع فتح النافذة — اسمح بالنوافذ المنبثقة عشان تطبع'); return; }
   w.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
   <title>${esc(title)}</title>
   <style>
@@ -524,72 +704,134 @@ const docHeader = (title, code) => `
 /* ============================================================================
    الرئيسية
    ========================================================================== */
+/* أول يوم في الشهر — أساس كل التقارير الدورية في المرجع. */
+const monthStart = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+};
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const daysBetween = (from, to) => {
+  if (!from) return 0;
+  const a = new Date(String(from).slice(0, 10) + 'T00:00:00');
+  const b = new Date(String(to).slice(0, 10) + 'T00:00:00');
+  return Math.floor((b - a) / 86400000);
+};
+
 async function pageHome() {
   loading();
-  const [orders, workers, accounts, fabric] = await Promise.all([
-    view('orders'), view('workers'), view('accounts'), view('fabric'),
+  const since = monthStart();
+  const [orders, workers, accounts, stages, cashTxns] = await Promise.all([
+    view('orders'), view('workers'), view('accounts'),
+    view('order_stages'), table('financial_transactions'),
   ]);
+
   const open = orders.filter((o) => o.status === 'open');
-  const totalQty = orders.reduce((s, o) => s + Number(o.quantity), 0);
-  const cutQty = orders.reduce((s, o) => s + Number(o.cut_quantity), 0);
-  const ready = orders.reduce((s, o) => s + Number(o.ready_quantity), 0);
+  const openPieces = open.reduce((s, o) => s + Number(o.quantity), 0);
   const due = workers.reduce((s, w) => s + Number(w.remaining_due), 0);
   const cash = accounts.reduce((s, a) => s + Number(a.balance), 0);
+  /* مدفوعات العملاء مخزّنة بالسالب لأنها بتخرج من الخزنة. */
+  const collectedFromCustomers = cashTxns
+    .filter((t) => t.category === 'customer_payment' && !t.reverses_id)
+    .reduce((s, t) => s + Math.abs(Number(t.amount || 0)), 0);
+
+  /* مستحقات العملاء = قيمة المسلَّم ناقص التحصيلات. مفيش فواتير لسه،
+     فالمسلَّم × سعر القطعة هو المستحق، ومدفوعات العملاء بتتخصم منه. */
+  const deliveredValue = orders.reduce(
+    (s, o) => s + Number(o.delivered_quantity || 0) * Number(o.piece_price || 0), 0);
+  const receivables = Math.max(0, deliveredValue - collectedFromCustomers);
+
+  /* المراحل المتأخرة: ميعادها فات والمقبول لسه أقل من المطلوب. */
+  const late = stages
+    .filter((s) => s.due_date && daysBetween(s.due_date, todayISO()) > 0)
+    .filter((s) => Number(s.accepted_qty) < Number(s.cut_quantity || 0))
+    .map((s) => ({ ...s, lateDays: daysBetween(s.due_date, todayISO()) }))
+    .sort((a, b) => b.lateDays - a.lateDays);
+
+  const byOrder = new Map(orders.map((o) => [o.id, o]));
 
   app.innerHTML = `
     <h1>أهلاً ${esc(PROFILE?.display_name || '')}</h1>
-    <p class="sub">نظرة سريعة على المصنع النهارده</p>
+    <p class="sub">النهارده ${dateAr(todayISO())}</p>
 
-    <div class="grid g3" style="margin-bottom:18px">
-      ${can('production.receive') ? `<a class="card" href="#foreman" style="display:flex;gap:12px;align-items:center;margin:0">
-        <span style="font-size:24px">📦</span>
+    <div class="grid g3" style="margin-bottom:16px">
+      ${can('production.receive') ? `<a class="card qa-card" href="#foreman">
+        <span class="qa-ico">${icon('package', 20)}</span>
         <div><b>تسليم واستلام</b><div class="hint">امسح كود الشنطة</div></div>
       </a>` : ''}
-      ${can('production.order.create') ? `<a class="card" href="#order-new" style="display:flex;gap:12px;align-items:center;margin:0">
-        <span style="font-size:24px">🧵</span>
+      ${can('production.order.create') ? `<a class="card qa-card" href="#order-new">
+        <span class="qa-ico">${icon('scissors', 20)}</span>
         <div><b>أمر جديد</b><div class="hint">افتح أمر تشغيل</div></div>
       </a>` : ''}
-      ${can('production.fabric.receive') ? `<a class="card" href="#warehouse" style="display:flex;gap:12px;align-items:center;margin:0">
-        <span style="font-size:24px">🏬</span>
+      ${can('production.fabric.receive') ? `<a class="card qa-card" href="#warehouse">
+        <span class="qa-ico">${icon('store', 20)}</span>
         <div><b>استلام قماش</b><div class="hint">سجّل أمتار العميل</div></div>
       </a>` : ''}
     </div>
 
     <div class="grid g4">
       <div class="kpi"><div class="lbl">أوامر مفتوحة</div>
-        <div class="val">${num(open.length)} <small>من ${num(orders.length)}</small></div></div>
-      <div class="kpi"><div class="lbl">قطع متقصّة</div>
-        <div class="val">${num(cutQty)} <small>من ${num(totalQty)}</small></div>
-        <div class="bar" style="margin-top:8px"><i style="width:${totalQty ? Math.round(cutQty / totalQty * 100) : 0}%"></i></div></div>
-      <div class="kpi"><div class="lbl">جاهز للتسليم</div><div class="val">${num(ready)}</div></div>
-      ${can('worker.financial.view') ? `<div class="kpi"><div class="lbl">مستحق للصنايعية</div><div class="val">${money(due)}</div></div>` : ''}
-      ${can('account.view') ? `<div class="kpi"><div class="lbl">الخزنة والبنوك</div><div class="val">${money(cash)}</div></div>` : ''}
-      <div class="kpi"><div class="lbl">قماش بالمخزن</div>
-        <div class="val">${num(fabric.reduce((s, f) => s + Number(f.balance), 0))} <small>متر</small></div></div>
+        <div class="val">${num(open.length)}</div></div>
+      <div class="kpi"><div class="lbl">قطع في الأوامر المفتوحة</div>
+        <div class="val">${num(openPieces)}</div></div>
+      <div class="kpi"><div class="lbl">مستحقات على العملاء</div>
+        <div class="val">${amount(receivables)}</div></div>
+      ${can('account.view') ? `<div class="kpi"><div class="lbl">رصيد الخزنة والبنوك</div>
+        <div class="val">${amount(cash)}</div></div>` : ''}
+      ${can('worker.financial.view') ? `<div class="kpi"><div class="lbl">مستحق للصنايعية</div>
+        <div class="val">${amount(due)}</div></div>` : ''}
     </div>
 
-    <h2>أوامر شغالة</h2>
-    ${tbl([
-      { label: 'الكود', render: (r) => `<a class="link" href="#order/${r.id}">${esc(r.code)}</a>` },
-      { label: 'العميل', key: 'customer_name' },
-      { label: 'الموديل', key: 'model_name' },
-      { label: 'الكمية', num: true, render: (r) => num(r.quantity) },
-      { label: 'اتقص', num: true, render: (r) => `${num(r.cut_quantity)}` },
-      { label: 'ميعاد التسليم', render: (r) => dateAr(r.due_date) },
-      { label: 'التقدم', render: (r) => `<div class="bar" style="width:80px"><i style="width:${r.cut_percent}%"></i></div>` },
-      { label: 'الحالة', render: (r) => chip(r.status) },
-    ], open.slice(0, 8), 'مفيش أوامر مفتوحة')}
-    <div style="margin-top:10px"><a class="link" href="#orders">كل الأوامر ←</a></div>
+    ${late.length ? `<h2>تنبيهات</h2>
+      <div class="card" style="border-color:var(--warn)">
+        <div style="font-weight:700;margin-bottom:8px;color:var(--warn)">
+          مراحل متأخرة (${num(late.length)})</div>
+        <div style="display:grid;gap:8px">
+          ${late.slice(0, 8).map((s) => {
+          const o = byOrder.get(s.order_id);
+          return `<a class="late-row" href="#order/${esc(s.order_id)}">
+              <b>${esc(o?.code || '')}</b> — ${esc(s.name_ar)}:
+              <span class="num">${num(s.accepted_qty)}</span> من
+              <span class="num">${num(s.cut_quantity)}</span> —
+              متأخرة <span class="num">${num(s.lateDays)}</span> يوم
+            </a>`;
+        }).join('')}
+        </div>
+      </div>` : ''}
 
-    <h2>الصنايعية</h2>
-    ${tbl([
-      { label: 'الكود', key: 'code' },
-      { label: 'الصنايعي', render: (r) => `<a class="link" href="#worker/${r.id}">${esc(r.name)}</a>` },
-      { label: 'مقبول', num: true, render: (r) => num(r.accepted_total) },
-      { label: 'مرفوض', num: true, render: (r) => num(r.rejected_total) },
-      { label: 'اتكسب', num: true, render: (r) => money(r.earned_total) },
-      { label: 'المتبقي له', num: true, render: (r) => `<b>${money(r.remaining_due)}</b>` },
-    ], workers.filter((w) => w.kind === 'worker'), 'مفيش صنايعية')}`;
+    <h2>تقدّم الأوامر المفتوحة</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <a class="link" href="#orders">كل الأوامر</a>
+    </div>
+    ${open.length ? `<div class="grid g2">
+      ${open.slice(0, 6).map((o) => {
+      const pct = Number(o.quantity) ? Math.round(Number(o.cut_quantity) / Number(o.quantity) * 100) : 0;
+      return `<a class="card order-card" href="#order/${esc(o.id)}">
+          <div class="order-card-top">
+            <b>${esc(o.code)}</b>
+            <span class="hint">${esc(o.model_name || '')}</span>
+          </div>
+          <div class="hint" style="margin:2px 0 10px">${esc(o.customer_name)}</div>
+          <div class="order-card-nums">
+            <span><span class="num">${num(o.cut_quantity)}</span> / <span class="num">${num(o.quantity)}</span> اتقص</span>
+            <span class="num">${pct}%</span>
+          </div>
+          <div class="bar" style="margin-top:6px"><i style="width:${pct}%"></i></div>
+          ${o.due_date ? `<div class="hint" style="margin-top:8px">التسليم ${dateAr(o.due_date)}</div>` : ''}
+        </a>`;
+    }).join('')}
+    </div>` : emptyState('box', 'مفيش أوامر مفتوحة', 'ابدأ بأمر جديد من الزرار فوق')}
+
+    <h2>إنتاج كل صنايعي (من ${dateAr(since)})</h2>
+    ${(() => {
+      const rows = workers.filter((w) => w.kind === 'worker' && Number(w.accepted_total) > 0);
+      if (!rows.length) return emptyState('worker', 'مفيش شغل اتسلّم الشهر ده', 'الاستلام من شاشة رئيس العمال');
+      return tbl([
+        { label: 'الصنايعي', render: (r) => `<a class="link" href="#worker/${r.id}">${esc(r.name)}</a>` },
+        { label: 'مقبول', num: true, render: (r) => num(r.accepted_total) },
+        { label: 'مرفوض', num: true, render: (r) => num(r.rejected_total) },
+        { label: 'الأجر', num: true, render: (r) => amount(r.earned_total) },
+      ], rows, 'مفيش شغل');
+    })()}`;
 }
 
 /* ============================================================================
@@ -602,29 +844,149 @@ async function pageForeman() {
   loading();
   const workers = await view('workers');
   window.__workers = workers.filter((w) => w.kind === 'worker' && w.is_active);
+  const tab = window.__foremanTab || 'available';
 
   app.innerHTML = `
-    <h1>رئيس العمال</h1>
-    <p class="sub">امسح كود الشنطة أو اكتبه، وبعدين سلّم أو استلم</p>
+    ${pageHead('رئيس العمال', 'اكتب كود الشنطة وسلّم أو استلم الشغل')}
 
     <div class="card">
-      <label class="label">كود الشنطة</label>
+      <label class="label" for="fCode">كود الشنطة</label>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <input id="fCode" class="input mono" placeholder="BND0001" autocomplete="off"
                style="flex:1;min-width:180px;font-size:18px;letter-spacing:.08em">
         <button class="btn btn-primary" id="fFind">بحث</button>
-        <button class="btn btn-ghost" id="fCam">📷 مسح بالكاميرا</button>
+        <button class="btn btn-ghost" id="fCam">${btnIcon('camera', 'مسح بالكاميرا')}</button>
+        <button class="btn btn-ghost" id="fQuick">${btnIcon('check', 'استلام سريع')}</button>
       </div>
       <p class="hint" style="margin:8px 0 0">بيقرأ كود الشنطة (BND…) أو باركود القطعة (MM0001).</p>
       <div id="camBox" style="margin-top:12px"></div>
     </div>
 
-    <div id="fResult"></div>`;
+    <div id="fResult"></div>
+
+    <h2 style="display:flex;align-items:center;gap:10px">الشغل مع الصنايعية
+      <button class="btn btn-ghost btn-sm" id="fRefresh">تحديث</button></h2>
+    <div style="margin-bottom:12px">
+      ${segFilter('foreman', [['available', 'المتاح للتسليم'], ['received', 'تم استلامه']], tab)}
+    </div>
+    <div id="fQueue"><div class="empty">بيحمّل…</div></div>`;
 
   $('#fFind').onclick = () => lookupBundle($('#fCode').value.trim());
   $('#fCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') lookupBundle(e.target.value.trim()); });
   $('#fCam').onclick = () => startScan();
+  $('#fQuick').onclick = () => quickReceive();
+  $('#fRefresh').onclick = () => loadQueue(tab);
   $('#fCode').focus();
+  bindSeg('foreman', (v) => { window.__foremanTab = v; pageForeman(); });
+  loadQueue(tab);
+}
+
+/* الطابور: «المتاح» = شنطة عند صنايعي ومستنية الاستلام،
+   «تم استلامه» = خلصت مرحلة وبقت جاهزة تروح للمرحلة اللي بعدها. */
+async function loadQueue(tab) {
+  const box = $('#fQueue');
+  if (!box) return;
+  try {
+    const rows = await view('bundle_queue');
+    const picked = tab === 'received'
+      ? rows.filter((r) => r.stage_done && !r.open_assignment)
+      : rows.filter((r) => r.open_assignment && r.current_holder);
+    box.innerHTML = tbl([
+      { label: 'الشنطة', render: (r) => `<span class="mono">${esc(r.bundle_code)}</span>` },
+      { label: 'الأمر', render: (r) => `<span class="mono hint">${esc(r.order_code)}</span>` },
+      { label: 'المقاس', key: 'size' },
+      { label: 'اللون', render: (r) => esc(colourAr(r.colour_label)) },
+      { label: 'العدد', num: true, render: (r) => num(r.quantity) },
+      { label: 'المرحلة', render: (r) => esc(stageAr(r.stage_code)) },
+      { label: 'عند', render: (r) => esc(r.current_holder || '—') },
+      { label: '', render: (r) => (tab === 'available'
+        ? `<button class="btn btn-ghost btn-sm" data-rec="${esc(r.open_assignment)}">استلام</button>`
+        : `<a class="btn btn-ghost btn-sm" href="#bundle/${esc(r.bundle_id)}">فتح</a>`) },
+    ], picked, tab === 'available' ? 'مفيش شغل مع الصنايعية دلوقتي' : 'مفيش شغل اتستلم لسه');
+
+    box.querySelectorAll('[data-rec]').forEach((b) => {
+      b.onclick = () => receiveAssignment(b.dataset.rec);
+    });
+  } catch (e) { box.innerHTML = `<div class="err">${esc(humanError(e))}</div>`; }
+}
+
+async function receiveAssignment(assignmentId) {
+  try {
+    const picked = await formDialog('استلام الشغل', [
+      { key: 'accepted', label: 'العدد المقبول', type: 'number', min: 0, required: true },
+      { key: 'rejected', label: 'المرفوض', type: 'number', min: 0, value: '0' },
+      { key: 'reason', label: 'سبب الرفض', hint: 'لو فيه مرفوض' },
+    ]);
+    if (!picked) return;
+    await rpc('rpc_receive_work', {
+      p_assignment: assignmentId,
+      p_accepted: Number(picked.accepted || 0),
+      p_rejected: Number(picked.rejected || 0),
+      p_rework: 0,
+      p_reason: picked.reason || null,
+    });
+    notify('اتسجل الاستلام');
+    loadQueue(window.__foremanTab || 'available');
+  } catch (e) { notifyErr(humanError(e)); }
+}
+
+/* استلام سريع: بنستلم كل الشغل المتاح بالعدد المطلوب من غير ما نفتح شنطة شنطة. */
+async function quickReceive() {
+  const box = $('#fQueue');
+  if (!box) return;
+  const rows = await view('bundle_queue');
+  const ready = rows.filter((r) => r.open_assignment && r.current_holder);
+  if (!ready.length) { notify('مفيش شغل متاح للاستلام'); return; }
+
+  const mask = document.createElement('div');
+  mask.className = 'mask';
+  mask.innerHTML = `<form class="modal modal-wide">
+    <h3>استلام سريع</h3>
+    <p class="hint">كل شنطة هتتسجل بالعدد الكامل مقبول. عدّل اللي تحبه.</p>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>الشنطة</th><th>المرحلة</th><th>عند</th><th>العدد</th><th>مقبول</th><th>مرفوض</th></tr></thead>
+      <tbody>${ready.map((r) => `<tr>
+        <td><span class="mono">${esc(r.bundle_code)}</span></td>
+        <td>${esc(stageAr(r.stage_code))}</td>
+        <td>${esc(r.current_holder || '—')}</td>
+        <td class="num">${num(r.quantity)}</td>
+        <td><input class="input input-sm" type="number" min="0" value="${Number(r.quantity)}"
+          data-acc="${esc(r.open_assignment)}"></td>
+        <td><input class="input input-sm" type="number" min="0" value="0"
+          data-rej="${esc(r.open_assignment)}"></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div class="acts">
+      <button type="submit" class="btn btn-primary">استلام الكل</button>
+      <button type="button" class="btn btn-ghost" data-cancel>إلغاء</button>
+    </div>
+  </form>`;
+  document.body.appendChild(mask);
+  const form = mask.querySelector('form');
+  const close = () => mask.remove();
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    close();
+    let ok = 0, failed = 0;
+    for (const r of ready) {
+      const accEl = form.querySelector(`[data-acc="${r.open_assignment}"]`);
+      const rejEl = form.querySelector(`[data-rej="${r.open_assignment}"]`);
+      const acc = accEl ? Number(accEl.value || 0) : Number(r.quantity);
+      const rej = rejEl ? Number(rejEl.value || 0) : 0;
+      if (!acc && !rej) continue;
+      try {
+        await rpc('rpc_receive_work', {
+          p_assignment: r.open_assignment, p_accepted: acc, p_rejected: rej, p_rework: 0,
+        });
+        ok += 1;
+      } catch (err) { failed += 1; }
+    }
+    notify(failed ? `اتسجل ${ok} — فشل ${failed}` : `اتسجل استلام ${ok} شنطة`);
+    loadQueue(window.__foremanTab || 'available');
+  };
+  mask.querySelector('[data-cancel]').onclick = close;
+  mask.onclick = (e) => { if (e.target === mask) close(); };
 }
 
 async function startScan() {
@@ -768,7 +1130,7 @@ function renderAssign(b, available) {
         p_bundle: b.id, p_stage: $('#aStage').value, p_employee: $('#aEmp').value,
       });
       lookupBundle(b.code);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 
   const selfBtn = $('#aSelf');
@@ -776,7 +1138,7 @@ function renderAssign(b, available) {
     try {
       await rpc('rpc_claim_bundle', { p_bundle: b.id, p_stage: $('#aStage').value });
       lookupBundle(b.code);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -821,7 +1183,7 @@ function renderReceive(b) {
         p_reason: $('#rWhy').value.trim() || null,
       });
       lookupBundle(b.code);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -834,24 +1196,18 @@ async function pageOrders() {
   const filter = window.__orderFilter || 'open';
   const rows = filter === 'all' ? orders : orders.filter((o) => o.status === filter);
 
-  const tab = (k, label) => `<button class="btn btn-sm ${filter === k ? 'btn-primary' : 'btn-ghost'}"
-    data-filter="${k}">${label}</button>`;
-
   app.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-      <div><h1 style="margin:0">الأوامر</h1><p class="sub" style="margin:4px 0 0">${num(rows.length)} أمر</p></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <a class="btn btn-ghost" href="#templates">قوالب المراحل</a>
-        <a class="btn btn-primary" href="#order-new">أمر جديد</a>
-      </div>
-    </div>
+    ${pageHead('أوامر التشغيل', '',
+      `<a class="btn btn-ghost" href="#templates">${btnIcon('file', 'قوالب المراحل')}</a>
+       <a class="btn btn-primary" href="#order-new">${btnIcon('plus', 'أمر جديد')}</a>`)}
 
-    <div style="display:flex;gap:6px;margin:14px 0">
-      ${tab('open', 'مفتوح')}${tab('completed', 'مكتمل')}${tab('cancelled', 'ملغي')}${tab('all', 'الكل')}
+    <div style="margin-bottom:14px">
+      ${segFilter('order', [['open', 'مفتوح'], ['completed', 'مكتمل'],
+        ['cancelled', 'ملغي'], ['all', 'الكل']], filter)}
     </div>
 
     ${tbl([
-      { label: 'الكود', render: (r) => `<a class="link" href="#order/${r.id}">${esc(r.code)}</a>` },
+      { label: 'الكود', render: (r) => `<a class="link mono" href="#order/${r.id}">${esc(r.code)}</a>` },
       { label: 'العميل', key: 'customer_name' },
       { label: 'الموديل', key: 'model_name' },
       { label: 'الكمية', num: true, render: (r) => num(r.quantity) },
@@ -864,71 +1220,98 @@ async function pageOrders() {
           <span class="hint">${r.cut_percent}%</span></div>` },
     ], rows, 'مفيش أوامر في التصنيف ده')}`;
 
-  app.querySelectorAll('[data-filter]').forEach((b) => {
-    b.onclick = () => { window.__orderFilter = b.dataset.filter; pageOrders(); };
-  });
+  bindSeg('order', (v) => { window.__orderFilter = v; pageOrders(); });
 }
 
 async function pageOrderNew() {
   loading();
-  const [customers, templates] = await Promise.all([
-    view('customers'), table('stage_templates'),
+  const [customers, templates, m] = await Promise.all([
+    view('customers'), table('stage_templates').catch(() => []), meta(),
   ]);
   const active = customers.filter((c) => c.is_active);
+  /* لو القوالب مش مقروءة تحت الصلاحيات الحالية، بنكمل بالمراحل الافتراضية
+     اللي meta() بيرجّعها، عشان إنشاء الأمر مايتعطّلش. */
+  const tplList = templates.length ? templates : [{ id: '', name_ar: 'القالب الافتراضي', is_default: true }];
+  let stageRows = [];
 
   app.innerHTML = `
-    <h1>أمر تشغيل جديد</h1>
-    <p class="sub">الألوان والمقاسات بتتحدد وقت القص</p>
+    ${pageHead('إنشاء الأمر', '')}
 
+    <h2>بيانات الأمر</h2>
     <div class="card">
       <div class="grid g2">
-        <div><label class="label">العميل</label>
-          <select id="oCustomer">${active.map((c) =>
-            `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.operating_letter)})</option>`).join('')}</select></div>
-        <div><label class="label">قالب المراحل</label>
-          <select id="oTemplate"><option value="">— الافتراضي —</option>
-            ${templates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></div>
+        <div><label class="label" for="oCustomer">العميل</label>
+          <select id="oCustomer" class="input"><option value="">— اختار —</option>
+            ${active.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}
+          </select></div>
+        <div><label class="label" for="oTemplate">قالب المراحل</label>
+          <select id="oTemplate" class="input">
+            ${tplList.map((t) => `<option value="${esc(t.id)}"
+              ${t.is_default ? 'selected' : ''}>${esc(t.name_ar || t.name)}</option>`).join('')}
+          </select>
+          <div class="hint"><a class="link" href="#templates">تعديل القوالب</a></div></div>
       </div>
-      <div style="margin-top:12px"><label class="label">الموديل</label>
-        <input id="oModel" class="input" placeholder="جاكيت تومي"></div>
-      <div class="grid g3" style="margin-top:12px">
-        <div><label class="label">سعر التصنيع للقطعة</label>
+      <div class="grid g2" style="margin-top:12px">
+        <div><label class="label" for="oModel">الموديل</label>
+          <input id="oModel" class="input" placeholder="جاكيت تومي"></div>
+        <div><label class="label" for="oPrice">سعر التصنيع للقطعة</label>
           <input id="oPrice" class="input" type="number" min="0" step="0.01" value="0"></div>
-        <div><label class="label">عدد القطع</label>
+      </div>
+      <div class="grid g2" style="margin-top:12px">
+        <div><label class="label" for="oQty">عدد القطع</label>
           <input id="oQty" class="input" type="number" min="1" value="0"></div>
-        <div><label class="label">ميعاد التسليم</label>
+        <div><label class="label" for="oDue">ميعاد التسليم</label>
           <input id="oDue" class="input" type="date"></div>
       </div>
-      <div style="margin-top:12px"><label class="label">ملاحظات</label>
+      <p class="hint">الألوان والمقاسات بتتحدد عند القص</p>
+      <div style="margin-top:12px"><label class="label" for="oNotes">ملاحظات</label>
         <input id="oNotes" class="input"></div>
-      <div style="margin-top:16px;display:flex;gap:8px">
-        <button class="btn btn-primary" id="oSave">إنشاء الأمر</button>
-        <a class="btn btn-ghost" href="#orders">إلغاء</a>
-      </div>
     </div>
 
-    <h2>مراحل القالب</h2>
-    <div id="tplStages"></div>`;
+    <h2>مراحل التشغيل</h2>
+    <div id="tplStages"><div class="empty">بيحمّل…</div></div>
 
+    <div style="margin-top:16px;display:flex;gap:8px">
+      <button class="btn btn-primary" id="oSave">إنشاء الأمر</button>
+      <a class="btn btn-ghost" href="#orders">إلغاء</a>
+    </div>`;
+
+  /* المراحل بتتعرض كصفوف قابلة للتعديل: سعر وميعاد لكل مرحلة،
+     زي المرجع بالظبط. القالب بيحدد المراحل والاعتماديات. */
   const loadStages = async () => {
     const tpl = $('#oTemplate').value;
-    const rows = tpl
+    stageRows = tpl
       ? await table('stage_template_stages', { template_id: tpl })
-      : (await meta()).stages || [];
-    $('#tplStages').innerHTML = tbl([
-      { label: '#', render: (r) => num(r.seq) },
-      { label: 'المرحلة', key: 'name_ar' },
-      { label: 'بتبدأ بعد', render: (r) => esc(depList(r.depends_on)) },
-      { label: 'سعر القطعة', num: true, render: (r) => money(r.piece_price) },
-    ], rows, 'مفيش مراحل');
+      : (m.stages || []);
+    stageRows = [...stageRows].sort((a, b) => Number(a.seq) - Number(b.seq));
+
+    $('#tplStages').innerHTML = stageRows.length ? `<div class="card">
+      <div class="stage-list">
+        ${stageRows.map((s, i) => `<div class="stage-row">
+          <div class="stage-num">${num(s.seq)}</div>
+          <div class="stage-name"><b>${esc(s.name_ar)}</b>
+            <div class="hint">${Array.isArray(s.depends_on) && s.depends_on.length
+              ? 'بعد: ' + esc(depList(s.depends_on)) : 'من البداية'}</div></div>
+          <div><label class="label">سعر القطعة</label>
+            <input class="input input-sm" type="number" min="0" step="0.01"
+              data-price="${i}" value="${Number(s.piece_price || 0)}"></div>
+          <div><label class="label">الميعاد</label>
+            <input class="input input-sm" type="date" data-due="${i}"
+              value="${esc(s.due_date || '')}"></div>
+        </div>`).join('')}
+      </div>
+    </div>` : '<div class="empty">مفيش مراحل في القالب ده</div>';
   };
   $('#oTemplate').onchange = loadStages;
   loadStages();
 
   $('#oSave').onclick = async () => {
     try {
+      const cust = $('#oCustomer').value;
+      if (!cust) { notifyErr('اختار العميل الأول'); return; }
+
       const r = await rpc('rpc_create_production_order', {
-        p_customer: $('#oCustomer').value,
+        p_customer: cust,
         p_model: $('#oModel').value.trim(),
         p_quantity: Number($('#oQty').value || 0),
         p_piece_price: Number($('#oPrice').value || 0),
@@ -936,8 +1319,26 @@ async function pageOrderNew() {
         p_due_date: $('#oDue').value || null,
         p_notes: $('#oNotes').value.trim() || null,
       });
+
+      /* الأسعار والميعاد اللي المستخدم عدّلها بتروح للأمر بعد الإنشاء،
+         لأن الإنشاء بينسخ القالب زي ما هو. */
+      const edits = stageRows.map((s, i) => ({
+        seq: s.seq, code: s.code,
+        piece_price: Number($(`[data-price="${i}"]`).value || 0),
+        due_date: $(`[data-due="${i}"]`).value || null,
+      })).filter((e, i) => {
+        const orig = stageRows[i];
+        return e.piece_price !== Number(orig.piece_price || 0)
+          || e.due_date !== (orig.due_date || null);
+      });
+
+      if (edits.length) {
+        try {
+          await rpc('rpc_update_order_stages', { p_order: r.id, p_stages: edits });
+        } catch (err) { notifyErr(humanError(err)); }
+      }
       go('#order/' + r.id);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -1022,7 +1423,7 @@ function renderTemplateForm(tpl, stages) {
 
   $('#saveTpl').onclick = async () => {
     const name = $('#tplName').value.trim();
-    if (!name) { alert('اكتب اسم القالب'); return; }
+    if (!name) { notify('اكتب اسم القالب'); return; }
     const payload = [];
     $('#tplRows').querySelectorAll('.tpl-row').forEach((el, i) => {
       const val = (f) => el.querySelector(`[data-f="${f}"]`).value;
@@ -1035,13 +1436,13 @@ function renderTemplateForm(tpl, stages) {
         depends_on: val('depends_on').split(',').map((x) => x.trim()).filter(Boolean),
       });
     });
-    if (!payload.length) { alert('ضيف مرحلة واحدة على الأقل بكود'); return; }
+    if (!payload.length) { notify('ضيف مرحلة واحدة على الأقل بكود'); return; }
     try {
       await rpc('rpc_save_stage_template', {
         p_template: tpl?.id || null, p_name: name, p_stages: payload,
       });
       pageTemplates();
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -1085,7 +1486,7 @@ function bundlesTable(bundles, order) {
         <td class="num">${num(b.quantity)}</td>
         <td><span class="mono hint">${esc(b.first_code || '—')} → ${esc(b.last_code || '—')}</span></td>
         <td>${chip(b.status)}</td>
-        <td><button class="btn btn-ghost btn-sm" data-label="${esc(b.code)}">🏷 ليبل</button></td>
+        <td><button class="btn btn-ghost btn-sm" data-label="${esc(b.code)}">${btnIcon('tag', 'ليبل')}</button></td>
       </tr>`).join('');
 
     return `<tr class="grp"><td colspan="${hasColour ? 7 : 6}"
@@ -1113,92 +1514,256 @@ function stageAction(s) {
   return btns.length ? `<div style="display:flex;gap:6px">${btns.join('')}</div>` : '—';
 }
 
-async function pageOrder(id) {
+/* ------------------------------------------------------------------ تفاصيل الأمر
+   خمس تبويبات زي المرجع: الإنتاج · الشنط · التسليم والمرتجعات · التكلفة · السجل.
+   التبويب بيتحفظ في الهاش (#order/<id>/<tab>) عشان تحديث الصفحة يرجّعك لنفس المكان. */
+const ORDER_TABS = [
+  ['production', 'الإنتاج'],
+  ['bundles', 'الشنط'],
+  ['delivery', 'التسليم والمرتجعات'],
+  ['costing', 'التكلفة'],
+  ['log', 'السجل'],
+];
+
+/* مصفوفة اللون × المقاس. المرجع بيعرضها كجدول المقاسات في الأعمدة
+   والألوان في الصفوف، وخانة الفارغة معناها مفيش قص للون ده بالمقاس ده. */
+function sizeMatrix(rows, hasColour) {
+  const sizes = [...new Set(rows.map((r) => r.size))].sort(sizeCmp);
+  if (!sizes.length) return '<div class="empty">لسه ما اتعملش قص</div>';
+
+  const colours = hasColour
+    ? [...new Set(rows.map((r) => r.colour || ''))].sort((a, b) => a.localeCompare(b, 'ar'))
+    : [''];
+  const cell = new Map(rows.map((r) => [(r.colour || '') + '||' + r.size, Number(r.cut_qty)]));
+  const total = rows.reduce((s, r) => s + Number(r.cut_qty), 0);
+
+  const head = `<thead><tr><th>${hasColour ? 'اللون' : 'المقاس'}</th>
+    ${sizes.map((s) => `<th class="num">${esc(s)}</th>`).join('')}
+    <th class="num">الإجمالي</th></tr></thead>`;
+
+  const body = colours.map((c) => {
+    const vals = sizes.map((s) => cell.get(c + '||' + s) || 0);
+    const rowTotal = vals.reduce((a, b) => a + b, 0);
+    return `<tr>
+      <td><b>${esc(hasColour ? colourAr(c) : (c || 'الكل'))}</b></td>
+      ${vals.map((v) => `<td class="num">${v ? num(v) : '<span class="muted">—</span>'}</td>`).join('')}
+      <td class="num"><b>${num(rowTotal)}</b></td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="tbl-wrap"><table>${head}<tbody>${body}
+    <tr class="grp"><td colspan="${sizes.length + 2}">
+      الإجمالي <b>${num(total)}</b> قطعة</td></tr>
+    </tbody></table></div>`;
+}
+
+/* تفصيل التكلفة: 12 بند زي المرجع، وكل بند بيتحسب من الحركات الحقيقية. */
+function costingRows(o, cost, extra) {
+  const expectedRevenue = Number(o.quantity) * Number(o.piece_price);
+  const actualRevenue = Number(cost.actual_revenue || 0);
+  const wages = Number(cost.wages || 0);
+  const materials = Number(extra.materials || 0);
+  const shipping = Number(extra.shipping || 0);
+  const direct = Number(extra.direct != null ? extra.direct : cost.direct_expenses || 0);
+  const overhead = Number(extra.overhead || 0);
+  const totalCost = wages + materials + shipping + direct + overhead;
+  const delivered = Number(cost.delivered_qty || 0);
+  const perPiece = delivered > 0 ? totalCost / delivered : null;
+
+  return [
+    ['الإيراد المتوقع', expectedRevenue, ''],
+    ['الإيراد الفعلي', actualRevenue, 'المسلَّم ناقص المرتجع × سعر القطعة'],
+    ['المفوتر', 0, 'مفيش فواتير لسه'],
+    ['الأجور', wages, 'مجموع أجور المراحل المسلَّمة'],
+    ['الخامات والمستلزمات', materials, 'المستلزمات المصروفة على الأمر'],
+    ['الشحن', shipping, 'مصروفات تصنيفها شحن'],
+    ['مصروفات مباشرة', direct, 'مصروفات مسجّلة على الأمر'],
+    ['نصيب المصروفات العامة والمرتبات', overhead, 'بيتوزّع على القطع الجاهزة'],
+    ['إجمالي التكلفة', totalCost, ''],
+    ['تكلفة القطعة', perPiece, 'إجمالي التكلفة ÷ المسلَّم'],
+    ['الربح المتوقع', expectedRevenue - totalCost, ''],
+    ['الربح الفعلي', actualRevenue - totalCost, ''],
+  ];
+}
+
+async function pageOrder(id, tab) {
   loading();
-  const [orders, stages, bundles, costing, timeline, deliveries, returns] = await Promise.all([
-    view('orders'), view('order_stages', { order_id: id }), view('bundles', { order_id: id }),
-    view('costing'), view('timeline', { order_id: id }), table('deliveries', { order_id: id }),
-    table('customer_returns', { order_id: id }),
-  ]);
+  const [orders, stages, bundles, costing, timeline, deliveries, returns, exps] =
+    await Promise.all([
+      view('orders'), view('order_stages', { order_id: id }), view('bundles', { order_id: id }),
+      view('costing'), view('timeline', { order_id: id }), table('deliveries', { order_id: id }),
+      table('customer_returns', { order_id: id }), table('expenses'),
+    ]);
   const o = orders.find((x) => x.id === id);
   if (!o) { app.innerHTML = '<div class="err">الأمر مش موجود</div>'; return; }
+
   const st = stages.filter((s) => s.order_id === id);
   const tl = timeline.filter((t) => t.order_id === id);
   const cost = costing.find((c) => c.id === id || c.order_id === id) || {};
   const remaining = Number(o.quantity) - Number(o.cut_quantity);
+  const active = ORDER_TABS.some(([k]) => k === tab) ? tab : 'production';
+
+  const liveBundles = bundles.filter((b) => b.status !== 'cancelled');
+  const readyQty = Number(o.ready_quantity || 0);
+
+  /* مصفوفة القص بتتبني من الشنط: كل شنطة بتعرف لونها ومقاسها وكميتها،
+     ومجموعها هو اللي اتقص فعلًا. */
+  const cutRows = liveBundles.map((b) => ({
+    colour: b.colour || '', size: b.size || '', cut_qty: Number(b.quantity || 0),
+  }));
+  const hasColour = cutRows.some((r) => r.colour);
+
+  /* المصروفات: اللي متسجل على الأمر نفسه مصروفات مباشرة، والشحن تصنيفه «شحن».
+     اللي مش متسجل على أمر هو عمومي، وبيتوزّع بنسبة قطع الأمر من إجمالي الجاهز. */
+  const ownExps = exps.filter((e) => e.production_order_id === id && !e.reverses_id);
+  const directExps = ownExps.filter((e) => e.category !== 'شحن')
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const shipping = ownExps.filter((e) => e.category === 'شحن')
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const allOverhead = exps.filter((e) => !e.production_order_id && !e.reverses_id)
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalReady = orders.reduce((s, x) => s + Number(x.ready_quantity || 0), 0);
+  const overhead = totalReady > 0 ? allOverhead * readyQty / totalReady : 0;
 
   app.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+    <div class="phead">
       <div>
-        <h1 style="margin:0">${esc(o.code)} · ${esc(o.model_name)}</h1>
-        <p class="sub" style="margin:4px 0 0">${esc(o.customer_name)} · ${num(o.quantity)} قطعة ·
-           ${money(o.piece_price)}/قطعة · ميعاد ${dateAr(o.due_date)}</p>
+        <h1>أمر ${esc(o.code)}</h1>
+        <p class="sub" style="margin:4px 0 0">${esc(o.customer_name)} · ${esc(o.model_name)}</p>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-ghost" id="printOrder">🖨 طباعة الأمر</button>
-        ${o.status === 'open' ? '<button class="btn btn-danger" id="cancelBtn">إلغاء الأمر</button>' : ''}
+      <div class="phead-acts">
+        <a class="btn btn-ghost" href="#orders">رجوع</a>
+        ${o.status === 'open' && can('production.order.edit')
+      ? `<button class="btn btn-ghost" id="editBtn">تعديل الأمر</button>` : ''}
+        ${o.status === 'open' && can('production.order.close')
+      ? `<button class="btn btn-ghost" id="closeBtn">إقفال الأمر</button>` : ''}
+        ${o.status === 'open' ? `<button class="btn btn-danger" id="cancelBtn">إلغاء الأمر</button>` : ''}
+        <button class="btn btn-ghost" id="printOrder">${btnIcon('printer', 'طباعة')}</button>
       </div>
     </div>
 
-    <div class="grid g4" style="margin:16px 0">
-      <div class="kpi"><div class="lbl">اتقص</div><div class="val">${num(o.cut_quantity)} <small>من ${num(o.quantity)}</small></div>
-        <div class="bar" style="margin-top:8px"><i style="width:${o.cut_percent}%"></i></div></div>
-      <div class="kpi"><div class="lbl">شنط</div><div class="val">${num(o.bundle_count)}</div></div>
-      <div class="kpi"><div class="lbl">جاهز للتسليم</div><div class="val">${num(o.ready_quantity)}</div></div>
-      <div class="kpi"><div class="lbl">الحالة</div><div class="val" style="font-size:1rem">${chip(o.status)}</div></div>
-      <div class="kpi"><div class="lbl">الإيراد المتوقع</div><div class="val" style="font-size:1.1rem">${money(cost.expected_revenue)}</div></div>
-      <div class="kpi"><div class="lbl">التكلفة</div><div class="val" style="font-size:1.1rem">${money(cost.total_cost)}</div></div>
+    <div class="grid g4" style="margin:14px 0">
+      <div class="kpi"><div class="lbl">الحالة</div>
+        <div class="val" style="font-size:1rem">${chip(o.status)}</div></div>
+      <div class="kpi"><div class="lbl">سعر التصنيع للقطعة</div>
+        <div class="val" style="font-size:1.1rem">${amount(o.piece_price)}</div></div>
+      <div class="kpi"><div class="lbl">تاريخ الأمر</div>
+        <div class="val" style="font-size:1rem">${dateAr(o.order_date)}</div></div>
+      <div class="kpi"><div class="lbl">ميعاد التسليم</div>
+        <div class="val" style="font-size:1rem">${dateAr(o.due_date)}</div></div>
+    </div>
+    ${o.notes ? `<div class="card tight"><span class="hint">ملاحظات: </span>${esc(o.notes)}</div>` : ''}
+
+    <div class="tabs" role="tablist">
+      ${ORDER_TABS.map(([k, label]) => `<a role="tab" class="tab${k === active ? ' on' : ''}"
+        aria-selected="${k === active}" href="#order/${esc(id)}/${k}">${esc(label)}${
+      k === 'bundles' && liveBundles.length ? ` (${num(liveBundles.length)})` : ''}</a>`).join('')}
     </div>
 
-    <h2>المراحل</h2>
-    <p class="hint" style="margin:-6px 0 10px">المرحلة بتظهر لما اللي قبلها يخلص. اضغط «سلّم» عشان تسلّم الشغل
-      لصنايعي، أو «استلم» عشان تقبض الشغل اللي رجع.</p>
-    ${tbl([
+    <div id="tabBody">
+      ${active === 'production' ? `
+        <h2>الكميات</h2>
+        <p class="hint" style="margin:-6px 0 10px">اتقص ${num(o.cut_quantity)} من ${num(o.quantity)}</p>
+        ${sizeMatrix(cutRows, hasColour)}
+
+        <h2>مسار التشغيل</h2>
+        ${tbl([
       { label: 'المرحلة', render: (r) => `<b>${esc(r.name_ar)}</b>
-          ${r.deps_done ? '' : '<div class="hint">مستنية ' + esc(depList(r.depends_on)) + '</div>'}` },
-      { label: 'بتبدأ بعد', render: (r) => esc(depList(r.depends_on)) },
-      { label: 'مقبول', num: true, render: (r) => num(r.accepted_qty) },
-      { label: 'شغال', num: true, render: (r) => num(r.in_flight_qty) },
-      { label: 'مرفوض', num: true, render: (r) => num(r.rejected_qty) },
-      { label: 'الحالة', render: (r) => chip(r.status) },
+            ${Number(r.accepted_qty) < Number(r.cut_quantity) && r.due_date
+          && daysBetween(r.due_date, todayISO()) > 0
+          ? `<div class="chip chip-bad" style="margin-top:4px">متأخر</div>` : ''}` },
+      { label: 'المقبول / المقصوص', num: true,
+        render: (r) => `<span class="num">${num(r.accepted_qty)}</span> / <span class="num">${num(r.cut_quantity)}</span>` },
+      { label: 'المرفوض', num: true, render: (r) => num(r.rejected_qty) },
+      { label: 'تحت التشغيل', num: true, render: (r) => num(r.in_flight_qty) },
+      { label: 'التقدم', render: (r) => {
+        const cut = Number(r.cut_quantity);
+        const pct = cut ? Math.round(Number(r.accepted_qty) / cut * 100) : 0;
+        return `<div style="display:flex;align-items:center;gap:8px">
+              <div class="bar" style="width:64px"><i style="width:${pct}%"></i></div>
+              <span class="num">${pct}%</span></div>`;
+      } },
+      { label: 'الميعاد', render: (r) => dateAr(r.due_date) },
       { label: '', render: (r) => stageAction(r) },
-    ], st.filter((s) => s.deps_done || Number(s.accepted_qty) > 0 || Number(s.in_flight_qty) > 0),
-      'مفيش مراحل')}
+    ], st.filter((s) => s.deps_done || Number(s.accepted_qty) > 0
+      || Number(s.in_flight_qty) > 0), 'مفيش مراحل')}
 
-    <h2>الشنط</h2>
-    ${bundlesTable(bundles, o)}
+        ${remaining > 0 && o.status === 'open' ? `
+          <h2>قص وعمل شنط</h2>
+          <div class="card">
+            <p class="hint" style="margin:0 0 10px">الباقي من الأمر <b>${num(remaining)}</b> قطعة</p>
+            <button class="btn btn-primary" id="cutBtn">قص وعمل شنط</button>
+          </div>` : ''}
 
-    <h2>أذون التسليم</h2>
-    ${tbl([
-      { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
-      { label: 'التاريخ', render: (r) => dateAr(r.delivered_on) },
-      { label: 'ملاحظات', render: (r) => esc(r.notes || '—') },
-      { label: '', render: (r) => `<button class="btn btn-ghost btn-sm" data-doc="${esc(r.id)}">🖨 إذن</button>` },
-    ], deliveries, 'مفيش أذون تسليم')}
+        <h2>الشنط والأكواد</h2>
+        ${bundlesTable(liveBundles, o)}
+      ` : ''}
 
-    <h2>مرتجعات العميل</h2>
-    ${tbl([
-      { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
-      { label: 'التاريخ', render: (r) => dateAr(r.returned_on) },
-      { label: 'اللون', render: (r) => esc(colourAr(r.colour)) },
-      { label: 'المقاس', render: (r) => esc(r.size || '—') },
-      { label: 'الكمية', num: true, render: (r) => num(r.quantity) },
-      { label: 'السبب', render: (r) => esc(r.reason || '—') },
-      { label: 'التصرف', render: (r) => esc(returnDispAr(r.disposition)) },
-    ], returns, 'مفيش مرتجعات')}
+      ${active === 'bundles' ? `
+        <h2>الشنط والأكواد</h2>
+        ${bundlesTable(liveBundles, o)}
+      ` : ''}
 
-    <h2>التايم لاين</h2>
-    ${tbl([
-      { label: 'الوقت', render: (r) => esc(String(r.at).replace('T', ' ').slice(0, 16)) },
-      { label: 'الحدث', key: 'description', wrap: true },
-      { label: 'بواسطة', render: (r) => esc(r.actor || '—') },
-    ], tl, 'مفيش أحداث')}
+      ${active === 'delivery' ? `
+        <h2>البضاعة التامة والتسليم</h2>
+        <p class="hint" style="margin:-6px 0 10px">
+          جاهز ${num(readyQty)} · اتسلّم ${num(o.delivered_quantity)} ·
+          متاح ${num(Math.max(0, readyQty - Number(o.delivered_quantity)))}
+        </p>
+        ${sizeMatrix(cutRows, hasColour)}
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px">
-      ${remaining > 0 && o.status === 'open' ? '<button class="btn btn-primary" id="cutBtn">قص وعمل شنط</button>' : ''}
-      ${Number(o.ready_quantity) > 0 ? '<button class="btn btn-primary" id="deliverBtn">إنشاء إذن تسليم</button>' : ''}
-      ${Number(o.delivered_quantity) > 0 ? '<button class="btn btn-ghost" id="returnBtn">↩ مرتجع من العميل</button>' : ''}
+        <h2>أذونات التسليم</h2>
+        ${tbl([
+        { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+        { label: 'التاريخ', render: (r) => dateAr(r.delivered_on) },
+        { label: 'ملاحظات', render: (r) => esc(r.notes || '—') },
+        { label: '', render: (r) => `<button class="btn btn-ghost btn-sm" data-doc="${esc(r.id)}">${btnIcon('printer', 'إذن')}</button>` },
+      ], deliveries, 'لسه مفيش تسليم')}
+
+        <h2>مرتجع العميل</h2>
+        ${tbl([
+        { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+        { label: 'التاريخ', render: (r) => dateAr(r.returned_on) },
+        { label: 'اللون', render: (r) => esc(colourAr(r.colour)) },
+        { label: 'المقاس', render: (r) => esc(r.size || '—') },
+        { label: 'الكمية', num: true, render: (r) => num(r.quantity) },
+        { label: 'السبب', render: (r) => esc(r.reason || '—') },
+        { label: 'التصرف', render: (r) => esc(returnDispAr(r.disposition)) },
+      ], returns, 'مفيش مرتجعات')}
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+          ${readyQty > 0 ? '<button class="btn btn-primary" id="deliverBtn">إنشاء إذن تسليم</button>' : ''}
+          ${Number(o.delivered_quantity) > 0
+        ? `<button class="btn btn-ghost" id="returnBtn">${btnIcon('return', 'مرتجع من العميل')}</button>` : ''}
+        </div>
+      ` : ''}
+
+      ${active === 'costing' ? `
+        <h2>التكلفة والربحية</h2>
+        <p class="hint" style="margin:-6px 0 10px">
+          ${o.status === 'open' ? 'مبدئي' : 'نهائي'} · المطلوب ${num(o.quantity)} ·
+          جاهز ${num(readyQty)} · اتسلّم ${num(o.delivered_quantity)} · مرتجع ${num(cost.returned_qty)}
+        </p>
+        ${tbl([
+        { label: '', render: (r) => `<b>${esc(r[0])}</b>` },
+        { label: '', num: true, render: (r) => (r[1] == null ? '—' : amount(r[1])) },
+        { label: '', render: (r) => `<span class="hint">${esc(r[2])}</span>` },
+      ], costingRows(o, cost, { materials: 0, shipping, overhead, direct: directExps }), 'مفيش بيانات تكلفة')}
+        <p class="hint" style="margin-top:10px">
+          الأرقام مبدئية لحد ما الأمر يتقفل. نصيب المصروفات العامة بيتوزّع على القطع الجاهزة.
+        </p>
+      ` : ''}
+
+      ${active === 'log' ? `
+        <h2>التايم لاين</h2>
+        ${tbl([
+        { label: 'الوقت', render: (r) => esc(String(r.at).replace('T', ' ').slice(0, 16)) },
+        { label: 'الحدث', key: 'description', wrap: true },
+        { label: 'بواسطة', render: (r) => esc(r.actor || '—') },
+      ], tl, 'مفيش أحداث')}
+      ` : ''}
     </div>
+
     <div id="actionBox" style="margin-top:14px"></div>`;
 
   const printBtn = $('#printOrder');
@@ -1231,8 +1796,17 @@ async function pageOrder(id) {
     ]);
     if (!v || !v.why) return;
     try { await rpc('rpc_cancel_production_order', { p_id: o.id, p_reason: v.why }); pageOrder(id); }
-    catch (e) { alert(humanError(e)); }
+    catch (e) { notifyErr(humanError(e)); }
   };
+
+  const closeBtn = $('#closeBtn');
+  if (closeBtn) closeBtn.onclick = () => withBusy(closeBtn, 'بيقفل…', async () => {
+    try {
+      await rpc('rpc_close_production_order', { p_id: o.id });
+      notify('الأمر اتقفل');
+      pageOrder(id, 'costing');
+    } catch (e) { notifyErr(humanError(e)); }
+  });
 
   const cutBtn = $('#cutBtn');
   if (cutBtn) cutBtn.onclick = () => renderCutForm(o, remaining);
@@ -1283,7 +1857,7 @@ function renderReturnForm(order, bundles) {
   $('#rtCancel').onclick = () => { box.innerHTML = ''; };
   $('#rtGo').onclick = async () => {
     const qty = Number($('#rtQty').value || 0);
-    if (!qty || qty <= 0) { alert('اكتب كمية صحيحة'); return; }
+    if (!qty || qty <= 0) { notify('اكتب كمية صحيحة'); return; }
     const p = pairs[Number($('#rtPair').value)];
     try {
       await rpc('rpc_create_customer_return', {
@@ -1292,7 +1866,7 @@ function renderReturnForm(order, bundles) {
         p_disposition: $('#rtDisp').value,
       });
       pageOrder(order.id);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -1337,7 +1911,7 @@ async function renderStageAssign(order, stage, bundles) {
         p_bundle: $('#sBundle').value, p_stage: stage, p_employee: $('#sEmp').value,
       });
       pageOrder(order.id);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -1407,7 +1981,7 @@ async function renderStageReceive(order, stage, stages, bundles) {
         p_reason: $('#rWhy').value.trim() || null,
       });
       pageOrder(order.id);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -1576,13 +2150,13 @@ function renderCutForm(order, remaining) {
   $('#mColour').onclick = () => { mode = 'colour'; paintMode(); };
   $('#cApplySizes').onclick = () => {
     sizes = parseList($('#cSizes').value);
-    if (!sizes.length) { alert('اكتب المقاسات'); return; }
+    if (!sizes.length) { notify('اكتب المقاسات'); return; }
     Object.keys(qty).forEach((k) => { if (!sizes.includes(k.split('||')[1])) delete qty[k]; });
     fill();
   };
   $('#cApplyColours').onclick = () => {
     colours = parseList($('#cColours').value);
-    if (!colours.length) { alert('اكتب الألوان'); return; }
+    if (!colours.length) { notify('اكتب الألوان'); return; }
     fill();
   };
   /* Redraw on `change`, not on every keystroke: the redraw replaces the input
@@ -1599,16 +2173,16 @@ function renderCutForm(order, remaining) {
       const q = Number(qty[c + '||' + s] || 0);
       if (q > 0) lines.push({ colour: c, size: s, quantity: q });
     }));
-    if (!lines.length) { alert('اكتب الكميات في الجدول'); return; }
+    if (!lines.length) { notify('اكتب الكميات في الجدول'); return; }
     try {
       const r = await rpc('rpc_execute_cutting', {
         p_order: order.id, p_lines: lines,
         p_bundle_size: Number($('#cBundle').value || 40),
         p_has_colour: mode === 'colour',
       });
-      alert(`اتعمل ${r.bundles} شنطة و ${r.operational_codes} كود تشغيل`);
+      notify(`اتعمل ${r.bundles} شنطة و ${r.operational_codes} كود تشغيل`);
       pageOrder(order.id);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 
   paintMode();
@@ -1654,7 +2228,7 @@ function renderDeliveryForm(order, bundles) {
         lines.push({ colour: g.colour, size: g.size, quantity: q });
       }
     });
-    if (!lines.length) { alert('اكتب كمية واحدة على الأقل'); return; }
+    if (!lines.length) { notify('اكتب كمية واحدة على الأقل'); return; }
     try {
       const r = await rpc('rpc_create_delivery', {
         p_order: order.id, p_lines: lines, p_notes: $('#dNotes').value.trim() || null,
@@ -1662,10 +2236,10 @@ function renderDeliveryForm(order, bundles) {
       const d = await table('deliveries', { order_id: order.id });
       const doc = d.find((x) => x.code === r.code) || d[0];
       const dlines = doc ? await table('delivery_lines', { delivery_id: doc.id }) : [];
-      alert('اتعمل الإذن ' + (r.code || ''));
+      notify('اتعمل الإذن ' + (r.code || ''));
       if (doc) printDeliveryDoc({ ...order }, doc, dlines);
       pageOrder(order.id);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -1768,53 +2342,140 @@ function printDeliveryDoc(order, delivery, lines) {
    ========================================================================== */
 async function pageWarehouse() {
   loading();
-  const [fabric, customers] = await Promise.all([view('fabric'), view('customers')]);
-  const moves = await table('customer_fabric_movements');
-  app.innerHTML = `
-    <h1>المخزن</h1>
-    <p class="sub">قماش العملاء بيتتبع باللون بالمتر</p>
+  const [fabric, customers, moves] = await Promise.all([
+    view('fabric'), view('customers'), table('customer_fabric_movements'),
+  ]);
+  const custFilter = window.__whCust || '';
+  const shown = custFilter ? fabric.filter((f) => f.customer_id === custFilter) : fabric;
+  const sortedMoves = [...moves].sort((a, b) =>
+    String(b.txn_date || b.created_at).localeCompare(String(a.txn_date || a.created_at)));
+  const shownMoves = custFilter
+    ? sortedMoves.filter((m) => m.customer_id === custFilter) : sortedMoves;
 
-    <div class="card">
-      <h2 style="margin-top:0">استلام قماش من عميل</h2>
-      <div class="grid g4">
-        <div><label class="label">العميل</label>
-          <select id="wCust">${customers.map((c) =>
-            `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></div>
-        <div><label class="label">اللون</label><input id="wColour" class="input" placeholder="إسود"></div>
-        <div><label class="label">عدد الأمتار</label><input id="wQty" class="input" type="number" min="0" step="0.01" value="0"></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" id="wGo" style="width:100%">استلام</button></div>
-      </div>
+  app.innerHTML = `
+    ${pageHead('المخزن', 'قماش العملاء',
+      `<button class="btn btn-primary" id="whReceive">${btnIcon('plus', 'استلام قماش')}</button>
+       <button class="btn btn-ghost" id="whReturn">${btnIcon('return', 'مرتجع للعميل')}</button>`)}
+
+    <div class="card" style="padding:12px;margin-bottom:14px">
+      <label class="label" for="whCustFilter">العميل</label>
+      <select id="whCustFilter" class="input">
+        <option value="">كل العملاء</option>
+        ${customers.map((c) => `<option value="${esc(c.id)}"
+          ${c.id === custFilter ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+      </select>
     </div>
 
-    <h2>أرصدة القماش</h2>
+    <h2>الأرصدة</h2>
     ${tbl([
       { label: 'العميل', key: 'customer_name' },
       { label: 'اللون', key: 'colour' },
       { label: 'الرصيد', num: true, render: (r) =>
-        `<b style="color:${Number(r.balance) < 0 ? 'var(--bad)' : 'inherit'}">${num(r.balance)} متر</b>` },
-    ], fabric, 'مفيش قماش في المخزن')}
+        `<b style="color:${Number(r.balance) < 0 ? 'var(--bad)' : 'inherit'}">${num(r.balance)}م</b>` },
+    ], shown, 'مفيش قماش في المخزن')}
 
-    <h2>حركة القماش</h2>
+    <h2>آخر الحركات</h2>
     ${tbl([
       { label: 'التاريخ', render: (r) => dateAr(r.txn_date || r.created_at) },
+      { label: 'الحركة', render: (r) => esc(moveAr(r.movement || r.kind)) },
       { label: 'العميل', render: (r) =>
         esc(r.customer_name || customers.find((c) => c.id === r.customer_id)?.name || '—') },
       { label: 'اللون', key: 'colour' },
-      { label: 'النوع', render: (r) => esc(moveAr(r.movement || r.kind)) },
-      { label: 'الأمتار', num: true, render: (r) => num(r.quantity) },
+      { label: 'الكمية', num: true, render: (r) => `${num(Math.abs(r.quantity))}م` },
       { label: 'ملاحظات', render: (r) => esc(r.notes || '—') },
-    ], moves.slice(0, 40), 'مفيش حركات')}`;
+    ], shownMoves.slice(0, 40), 'مفيش حركات')}`;
 
-  $('#wGo').onclick = async () => {
-    try {
-      await rpc('rpc_receive_fabric', {
-        p_customer: $('#wCust').value,
-        p_colour: $('#wColour').value.trim(),
-        p_quantity: Number($('#wQty').value || 0),
-      });
-      pageWarehouse();
-    } catch (e) { alert(humanError(e)); }
+  $('#whCustFilter').onchange = (e) => {
+    window.__whCust = e.target.value;
+    pageWarehouse();
   };
+
+  $('#whReceive').onclick = () => fabricDialog('receive', customers, fabric, () => {
+    window.__whCust = '';
+    pageWarehouse();
+  });
+  $('#whReturn').onclick = () => fabricDialog('return', customers, fabric, () => {
+    window.__whCust = '';
+    pageWarehouse();
+  });
+}
+
+/* استلام ومرتجع القماش بيشاركوا نفس الحوار؛ الفرق في الدالة اللي بتتنادى. */
+function fabricDialog(kind, customers, fabric, done) {
+  const isReturn = kind === 'return';
+  const mask = document.createElement('div');
+  mask.className = 'mask';
+  mask.innerHTML = `<form class="modal">
+    <h3>${isReturn ? 'مرتجع قماش للعميل' : 'استلام قماش'}</h3>
+    <div class="field">
+      <label class="label" for="fbCust">العميل</label>
+      <select class="input" id="fbCust">
+        ${customers.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label class="label" for="fbColour">اللون</label>
+      <input class="input" id="fbColour" list="fbColours" autocomplete="off">
+      <datalist id="fbColours">
+        ${[...new Set(fabric.map((f) => f.colour))].map((c) =>
+          `<option value="${esc(c)}"></option>`).join('')}
+      </datalist>
+    </div>
+    <div class="field">
+      <label class="label" for="fbQty">عدد الأمتار</label>
+      <input class="input" id="fbQty" type="number" min="0.01" step="0.01" required>
+    </div>
+    <div class="field">
+      <label class="label" for="fbNotes">ملاحظات</label>
+      <input class="input" id="fbNotes">
+    </div>
+    <div class="acts">
+      <button type="submit" class="btn btn-primary">${isReturn ? 'ترجيع' : 'استلام'}</button>
+      <button type="button" class="btn btn-ghost" data-cancel>إلغاء</button>
+    </div>
+  </form>`;
+  document.body.appendChild(mask);
+
+  const form = mask.querySelector('form');
+  const close = () => mask.remove();
+  const colourInput = mask.querySelector('#fbColour');
+  const custSelect = mask.querySelector('#fbCust');
+
+  /* في المرتجع بنورّي رصيد العميل للون المختار عشان مايحاولش يرجّع أكتر منه. */
+  const showBalance = () => {
+    const hint = mask.querySelector('#fbBal');
+    if (!isReturn) { if (hint) hint.remove(); return; }
+    const row = fabric.find((f) => f.customer_id === custSelect.value
+      && f.colour === colourInput.value.trim());
+    let el = hint;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'fbBal';
+      el.className = 'hint';
+      colourInput.parentElement.appendChild(el);
+    }
+    el.textContent = row ? `الرصيد المتاح ${num(row.balance)} متر` : 'مفيش رصيد للون ده';
+  };
+  if (isReturn) { custSelect.onchange = showBalance; colourInput.oninput = showBalance; }
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      p_customer: custSelect.value,
+      p_colour: colourInput.value.trim(),
+      p_quantity: Number(mask.querySelector('#fbQty').value || 0),
+      p_notes: mask.querySelector('#fbNotes').value.trim() || null,
+    };
+    try {
+      await rpc(isReturn ? 'rpc_return_fabric' : 'rpc_receive_fabric', payload);
+      close();
+      done();
+    } catch (err) { notifyErr(humanError(err)); }
+  };
+  mask.querySelector('[data-cancel]').onclick = close;
+  mask.onclick = (e) => { if (e.target === mask) close(); };
+  mask.onkeydown = (e) => { if (e.key === 'Escape') close(); };
+  colourInput.focus();
 }
 
 /* ============================================================================
@@ -1823,23 +2484,31 @@ async function pageWarehouse() {
 async function pageCustomers() {
   loading();
   const [customers, fabric] = await Promise.all([view('customers'), view('fabric')]);
+  const q = (window.__custQ || '').trim();
+  const filtered = q
+    ? customers.filter((c) => `${c.name} ${c.code} ${c.phone || ''}`.includes(q))
+    : customers;
+
   app.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-      <div><h1 style="margin:0">العملاء</h1><p class="sub" style="margin:4px 0 0">${num(customers.length)} عميل</p></div>
-      <button class="btn btn-primary" id="newCust">+ عميل جديد</button>
+    ${pageHead('العملاء', `${num(customers.length)} عميل`,
+      `<button class="btn btn-primary" id="newCust">${btnIcon('plus', 'عميل جديد')}</button>`)}
+
+    <div class="card" style="padding:12px;margin-bottom:14px">
+      <label class="label" for="custSearch">بحث</label>
+      <input class="input" id="custSearch" type="search" placeholder="بالاسم أو الكود أو التليفون"
+             value="${esc(q)}" autocomplete="off">
     </div>
-    <div style="margin-top:14px">
-      ${tbl([
-        { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
-        { label: 'حرف التشغيل', render: (r) => `<span class="chip chip-open mono">${esc(r.operating_letter)}</span>` },
-        { label: 'الاسم', render: (r) => `<a class="link" href="#customer/${r.id}">${esc(r.name)}</a>` },
-        { label: 'التليفون', render: (r) => `<span dir="ltr">${esc(r.phone || '—')}</span>` },
-        { label: 'أوامر', num: true, render: (r) => num(r.order_count) },
-        { label: 'مفتوحة', num: true, render: (r) => num(r.open_order_count) },
-        { label: 'الحالة', render: (r) => r.is_active
-          ? '<span class="chip chip-done">نشط</span>' : '<span class="chip chip-bad">موقوف</span>' },
-      ], customers, 'مفيش عملاء لسه')}
-    </div>
+
+    ${tbl([
+      { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+      { label: 'حرف التشغيل', render: (r) => `<span class="chip chip-open mono">${esc(r.operating_letter)}</span>` },
+      { label: 'الاسم', render: (r) => `<a class="link" href="#customer/${r.id}">${esc(r.name)}</a>` },
+      { label: 'التليفون', render: (r) => `<span dir="ltr">${esc(r.phone || '—')}</span>` },
+      { label: 'أوامر', num: true, render: (r) => num(r.order_count) },
+      { label: 'مفتوحة', num: true, render: (r) => num(r.open_order_count) },
+      { label: 'الحالة', render: (r) => r.is_active
+        ? '<span class="chip chip-done">نشط</span>' : '<span class="chip chip-bad">موقوف</span>' },
+    ], filtered, q ? 'مفيش عميل بالاسم ده' : 'مفيش عملاء لسه')}
 
     <h2>قماش العملاء</h2>
     ${tbl([
@@ -1848,6 +2517,16 @@ async function pageCustomers() {
       { label: 'الرصيد', num: true, render: (r) => num(r.balance) + ' متر' },
     ], fabric, 'مفيش قماش')}`;
 
+  const search = $('#custSearch');
+  search.oninput = () => {
+    window.__custQ = search.value;
+    const caret = search.value;
+    pageCustomers().then(() => {
+      const el = $('#custSearch');
+      if (el) { el.focus(); el.setSelectionRange(caret.length, caret.length); }
+    });
+  };
+
   $('#newCust').onclick = async () => {
     const v = await formDialog('عميل جديد', [
       { key: 'name', label: 'اسم العميل' },
@@ -1855,7 +2534,7 @@ async function pageCustomers() {
     ]);
     if (!v || !v.name) return;
     try { await rpc('rpc_create_customer', { p_name: v.name, p_phone: v.phone || null }); pageCustomers(); }
-    catch (e) { alert(humanError(e)); }
+    catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -1868,7 +2547,7 @@ async function pageCustomer(id) {
   const myFabric = fabric.filter((f) => f.customer_id === id);
 
   app.innerHTML = `
-    <a class="link" href="#customers">← العملاء</a>
+    <a class="link" href="#customers">${icon('chevron', 14)} العملاء</a>
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-top:8px">
       <div>
         <h1 style="margin:0">${esc(c.name)}</h1>
@@ -1879,8 +2558,8 @@ async function pageCustomer(id) {
         </p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-ghost" id="editCust">✏️ تعديل</button>
-        <button class="btn btn-primary" id="invBtn">🖨 فاتورة PDF</button>
+        <button class="btn btn-ghost" id="editCust">${btnIcon('pencil', 'تعديل')}</button>
+        <button class="btn btn-primary" id="invBtn">${btnIcon('printer', 'فاتورة PDF')}</button>
       </div>
     </div>
     <div id="custEditBox"></div>
@@ -1929,7 +2608,7 @@ async function pageCustomer(id) {
     $('#ceCancel').onclick = () => { $('#custEditBox').innerHTML = ''; };
     $('#ceSave').onclick = async () => {
       const name = $('#ceName').value.trim();
-      if (!name) { alert('اكتب اسم العميل'); return; }
+      if (!name) { notify('اكتب اسم العميل'); return; }
       try {
         await rpc('rpc_update_customer', {
           p_id: c.id, p_name: name,
@@ -1938,7 +2617,7 @@ async function pageCustomer(id) {
           p_is_active: $('#ceActive').value === 'true',
         });
         pageCustomer(id);
-      } catch (e) { alert(humanError(e)); }
+      } catch (e) { notifyErr(humanError(e)); }
     };
   };
 }
@@ -1984,25 +2663,110 @@ function printInvoice(c, orders, fabric) {
 /* ============================================================================
    الصنايعية + كشف حساب PDF
    ========================================================================== */
+/* تسجيل مرتبات الشهر: كل الصنايعية اللي ليهم مستحقات في جدول واحد،
+   والمبلغ الافتراضي هو المستحق. اللي يتصفّر ما بيتصرفش له. */
+function openPayroll(workers) {
+  const due = workers.filter((w) => Number(w.remaining_due) > 0);
+  if (!due.length) { notify('مفيش مستحقات على حد الشهر ده'); return; }
+
+  const total = due.reduce((s, w) => s + Number(w.remaining_due), 0);
+  const mask = document.createElement('div');
+  mask.className = 'mask';
+  mask.innerHTML = `<form class="modal modal-wide">
+    <h3>تسجيل مرتبات الشهر</h3>
+    <p class="hint">المبلغ الافتراضي هو المستحق بالكامل. عدّل اللي تحبه، وسيبه صفر لو مش هتصرفه دلوقتي.</p>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>الكود</th><th>الاسم</th><th>الوظيفة</th><th>المستحق</th><th>المبلغ</th></tr></thead>
+        <tbody>
+          ${due.map((w) => `<tr>
+            <td><span class="mono">${esc(w.code)}</span></td>
+            <td>${esc(w.name)}</td>
+            <td>${esc(w.job_title || '—')}</td>
+            <td class="num">${amount(w.remaining_due)}</td>
+            <td><input class="input input-sm" type="number" min="0" step="0.01"
+              name="pay-${esc(w.id)}" value="${Number(w.remaining_due)}" data-due="${Number(w.remaining_due)}"></td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr>
+          <td colspan="3"><b>الإجمالي</b></td>
+          <td class="num"><b>${amount(total)}</b></td>
+          <td class="num"><b id="paySum">${amount(total)}</b></td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <div class="acts">
+      <button type="submit" class="btn btn-primary">صرف المبالغ</button>
+      <button type="button" class="btn btn-ghost" data-cancel>إلغاء</button>
+    </div>
+  </form>`;
+  document.body.appendChild(mask);
+
+  const form = mask.querySelector('form');
+  const close = () => mask.remove();
+
+  form.querySelectorAll('input[type=number]').forEach((inp) => {
+    inp.oninput = () => {
+      let sum = 0;
+      form.querySelectorAll('input[type=number]').forEach((i) => {
+        const v = Math.min(Number(i.value) || 0, Number(i.dataset.due));
+        sum += Math.max(0, v);
+      });
+      mask.querySelector('#paySum').innerHTML = amount(sum);
+    };
+  });
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const cash = (META.accounts || [])[0];
+    if (!cash) { notifyErr('مفيش خزنة معرّفة'); return; }
+
+    const rows = [];
+    form.querySelectorAll('input[type=number]').forEach((inp) => {
+      const w = due.find((x) => inp.name === `pay-${x.id}`);
+      const amt = Math.min(Number(inp.value) || 0, Number(inp.dataset.due));
+      if (w && amt > 0) rows.push({ w, amt });
+    });
+    if (!rows.length) { notify('مفيش مبالغ محددة'); return; }
+
+    close();
+    let ok = 0, failed = 0;
+    for (const { w, amt } of rows) {
+      try {
+        await rpc('rpc_post_cash', {
+          p_account: cash.id, p_amount: -Math.abs(amt),
+          p_category: 'worker_payment', p_description: 'مرتب شهر — ' + w.name,
+          p_employee: w.id,
+        });
+        ok += 1;
+      } catch (err) { failed += 1; }
+    }
+    notify(failed ? `اتصرف ${ok} — فشل ${failed}` : `اتصرف مرتب ${ok} صنايعي`);
+    pageWorkers();
+  };
+
+  mask.querySelector('[data-cancel]').onclick = close;
+  mask.onclick = (e) => { if (e.target === mask) close(); };
+  mask.onkeydown = (e) => { if (e.key === 'Escape') close(); };
+}
+
 async function pageWorkers() {
   loading();
   const workers = await view('workers');
   app.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-      <div><h1 style="margin:0">الصنايعية والحسابات</h1>
-        <p class="sub" style="margin:4px 0 0">${num(workers.length)} صنايعي</p></div>
-      <button class="btn btn-primary" id="newEmp">+ صنايعي جديد</button>
-    </div>
-    <div style="margin-top:14px">
+    ${pageHead('الصنايعية والحسابات', '',
+      `<button class="btn btn-ghost" id="payrollBtn">${btnIcon('wallet', 'تسجيل مرتبات الشهر')}</button>
+       <button class="btn btn-primary" id="newEmp">${btnIcon('plus', 'إضافة موظف جديد')}</button>`)}
+    <div>
       ${tbl([
         { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
         { label: 'الاسم', render: (r) => `<a class="link" href="#worker/${r.id}">${esc(r.name)}</a>` },
-        { label: 'التعريش', render: (r) => esc(r.job_title || '—') },
-        { label: 'مقبول', num: true, render: (r) => num(r.accepted_total) },
-        { label: 'مرفوض', num: true, render: (r) => num(r.rejected_total) },
-        { label: 'اتكسب', num: true, render: (r) => money(r.earned_total) },
-        { label: 'اتصرف', num: true, render: (r) => money(r.paid_total) },
-        { label: 'المتبقي له', num: true, render: (r) => `<b>${money(r.remaining_due)}</b>` },
+        { label: 'الوظيفة', render: (r) => esc(r.job_title || '—') },
+        { label: 'التليفون', render: (r) => `<span class="mono">${esc(r.phone || '—')}</span>` },
+        { label: 'الحالة', render: (r) => (r.is_active ? '<span class="chip chip-done">شغال</span>'
+      : '<span class="chip">موقوف</span>') },
+        { label: 'المتبقي له', num: true,
+          render: (r) => `<b>${amount(r.remaining_due)}</b>` },
         { label: '', render: (r) => `<button class="btn btn-sm btn-ghost" data-pay="${esc(r.id)}"
             data-name="${esc(r.name)}" data-due="${esc(r.remaining_due)}">صرف</button>
           <button class="btn btn-sm btn-ghost" data-emp="${esc(r.id)}"
@@ -2027,14 +2791,14 @@ async function pageWorkers() {
           p_phone: v.phone || null,
         });
         pageWorkers();
-      } catch (e) { alert(humanError(e)); }
+      } catch (e) { notifyErr(humanError(e)); }
     };
   });
 
   $('#newEmp').onclick = async () => {
-    const v = await formDialog('صنايعي جديد', [
+    const v = await formDialog('إضافة موظف جديد', [
       { key: 'name', label: 'اسم الصنايعي', value: '' },
-      { key: 'job', label: 'التعريش (خياط، قصاص…)', value: '' },
+      { key: 'job', label: 'الوظيفة (خياط، قصاص…)', value: '' },
       { key: 'phone', label: 'التليفون', value: '' },
     ]);
     if (!v || !v.name) return;
@@ -2043,13 +2807,16 @@ async function pageWorkers() {
         p_name: v.name, p_kind: 'worker', p_job_title: v.job || null, p_phone: v.phone || null,
       });
       pageWorkers();
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
+
+  const payrollBtn = $('#payrollBtn');
+  if (payrollBtn) payrollBtn.onclick = () => openPayroll(workers);
 
   app.querySelectorAll('[data-pay]').forEach((btn) => {
     btn.onclick = async () => {
       const due = Number(btn.dataset.due);
-      if (due <= 0) { alert('مفيش مستحقات'); return; }
+      if (due <= 0) { notify('مفيش مستحقات'); return; }
       const v = await formDialog(`صرف أجر — ${btn.dataset.name}`, [
         { key: 'amt', label: 'المبلغ (ج.م)', type: 'number', value: String(due),
           min: '0.01', step: '0.01', required: true,
@@ -2057,7 +2824,7 @@ async function pageWorkers() {
       ]);
       if (!v) return;
       const amt = Number(v.amt);
-      if (!Number.isFinite(amt) || amt <= 0) { alert('اكتب مبلغ أكبر من صفر'); return; }
+      if (!Number.isFinite(amt) || amt <= 0) { notify('اكتب مبلغ أكبر من صفر'); return; }
       try {
         const cash = (META.accounts || [])[0];
         await rpc('rpc_post_cash', {
@@ -2066,7 +2833,7 @@ async function pageWorkers() {
           p_employee: btn.dataset.pay,
         });
         pageWorkers();
-      } catch (e) { alert(humanError(e)); }
+      } catch (e) { notifyErr(humanError(e)); }
     };
   });
 }
@@ -2083,7 +2850,7 @@ async function pageWorker(id) {
   const myCash = cash.filter((t) => t.employee_id === id);
 
   app.innerHTML = `
-    <a class="link" href="#workers">← الصنايعية</a>
+    <a class="link" href="#workers">${icon('chevron', 14)} الصنايعية</a>
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-top:8px">
       <div>
         <h1 style="margin:0">${esc(w.name)}</h1>
@@ -2092,7 +2859,7 @@ async function pageWorker(id) {
           ${w.phone ? ' · <span dir="ltr">' + esc(w.phone) + '</span>' : ''}
         </p>
       </div>
-      <button class="btn btn-primary" id="pdfBtn">🖨 كشف حساب PDF</button>
+      <button class="btn btn-primary" id="pdfBtn">${btnIcon('printer', 'كشف حساب PDF')}</button>
     </div>
 
     <div class="card tight" style="margin-top:12px">
@@ -2168,7 +2935,7 @@ async function pageWorker(id) {
       ]);
       if (!v || !v.username) return;
       if (!v.password || v.password.length < 8) {
-        alert('كلمة السر لازم ٨ حروف على الأقل'); return;
+        notify('كلمة السر لازم ٨ حروف على الأقل'); return;
       }
       try {
         await OB.adminCreateUser({
@@ -2176,7 +2943,7 @@ async function pageWorker(id) {
           display_name: w.name, employee_id: w.id, roles: ['worker'],
         });
         pageWorker(id);
-      } catch (e) { alert(humanError(e)); }
+      } catch (e) { notifyErr(humanError(e)); }
     };
   }
 
@@ -2185,12 +2952,12 @@ async function pageWorker(id) {
   $('#prGo').onclick = async () => {
     const stage = $('#prStage').value;
     const rate = Number($('#prRate').value || 0);
-    if (!stage) { alert('اختار المرحلة'); return; }
-    if (rate < 0) { alert('السعر مش ممكن يكون سالب'); return; }
+    if (!stage) { notify('اختار المرحلة'); return; }
+    if (rate < 0) { notify('السعر مش ممكن يكون سالب'); return; }
     try {
       await rpc('rpc_set_piece_rate', { p_employee: id, p_stage: stage, p_rate: rate });
       pageWorker(id);
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -2240,8 +3007,7 @@ async function pageAccounts() {
   loading();
   const [accounts, txns] = await Promise.all([view('accounts'), table('financial_transactions')]);
   app.innerHTML = `
-    <h1>الخزنة والبنوك</h1>
-    <p class="sub">الأرصدة والحركات</p>
+    ${pageHead('الخزنة والبنوك', 'الأرصدة والحركات')}
     <div class="grid g2">
       ${accounts.map((a) => `<div class="kpi"><div class="lbl">${esc(a.name)}</div>
         <div class="val">${money(a.balance)}</div>
@@ -2299,7 +3065,7 @@ async function pageAccounts() {
         p_description: $('#tDesc').value.trim(),
       });
       pageAccounts();
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 
   app.querySelectorAll('[data-rev]').forEach((b) => {
@@ -2310,20 +3076,20 @@ async function pageAccounts() {
       ]);
       if (!v || !v.why) return;
       try { await rpc('rpc_reverse_cash', { p_id: b.dataset.rev, p_reason: v.why }); pageAccounts(); }
-      catch (e) { alert(humanError(e)); }
+      catch (e) { notifyErr(humanError(e)); }
     };
   });
 
   $('#aGo').onclick = async () => {
     const name = $('#aName').value.trim();
-    if (!name) { alert('اكتب اسم الحساب'); return; }
+    if (!name) { notify('اكتب اسم الحساب'); return; }
     try {
       await rpc('rpc_create_account', {
         p_name: name, p_kind: $('#aKind').value,
         p_opening: Number($('#aOpen').value || 0),
       });
       pageAccounts();
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -2333,43 +3099,107 @@ async function pageAccounts() {
 async function pageExpenses() {
   loading();
   const [expenses, orders] = await Promise.all([table('expenses'), view('orders')]);
+  const f = window.__expFilter || { from: '', to: '', cat: '', order: '' };
+
+  /* بنود المصروفات بتتجمّع من البيانات نفسها بدل ما تكون قائمة ثابتة،
+     عشان أي بند جديد يتسجل يظهر في الفلتر على طول. */
+  const used = expenses.map((e) => e.category).filter(Boolean);
+  const cats = [...new Set([...EXPENSE_CATS, ...used])];
+
+  const inRange = (d) => {
+    const day = String(d || '').slice(0, 10);
+    if (f.from && day < f.from) return false;
+    if (f.to && day > f.to) return false;
+    return true;
+  };
+  const rows = expenses.filter((e) => inRange(e.expense_date)
+    && (!f.cat || e.category === f.cat)
+    && (!f.order || e.order_id === f.order));
+  const total = rows.reduce((s, e) => s + Number(e.amount || 0), 0);
+
   app.innerHTML = `
-    <h1>المصروفات</h1>
-    <div class="card">
-      <h2 style="margin-top:0">مصروف جديد</h2>
-      <div class="grid g3">
-        <div><label class="label">التصنيف</label><input id="xCat" class="input" placeholder="كهرباء، إيجار…"></div>
-        <div><label class="label">المبلغ</label><input id="xAmt" class="input" type="number" min="0" step="0.01" value="0"></div>
-        <div><label class="label">من حساب</label>
-          <select id="xAcct">${(META.accounts || []).map((a) =>
-            `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></div>
+    ${pageHead('المصروفات', 'مصروفات المصنع التشغيلية')}
+
+    <div class="toolbar">
+      <button class="btn btn-primary" id="xNew">مصروف جديد</button>
+      <div class="filters">
+        <div><label class="label" for="xfFrom">من</label>
+          <input id="xfFrom" class="input input-sm" type="date" value="${esc(f.from)}"></div>
+        <div><label class="label" for="xfTo">لحد</label>
+          <input id="xfTo" class="input input-sm" type="date" value="${esc(f.to)}"></div>
+        <div><label class="label" for="xfCat">البند</label>
+          <select id="xfCat" class="input input-sm">
+            <option value="">كل البنود</option>
+            ${cats.map((c) => `<option value="${esc(c)}" ${f.cat === c ? 'selected' : ''}>${esc(txnCategoryAr(c))}</option>`).join('')}
+          </select></div>
+        <div><label class="label" for="xfOrder">أمر الإنتاج</label>
+          <select id="xfOrder" class="input input-sm">
+            <option value="">كل الأوامر</option>
+            ${orders.map((o) => `<option value="${esc(o.id)}" ${f.order === o.id ? 'selected' : ''}>${esc(o.code)} — ${esc(o.customer_name)}${o.model_name ? ' — ' + esc(o.model_name) : ''}</option>`).join('')}
+          </select></div>
       </div>
-      <div style="margin-top:10px"><label class="label">الوصف</label><input id="xDesc" class="input"></div>
-      <div style="margin-top:10px"><label class="label">على أمر (اختياري)</label>
-        <select id="xOrder"><option value="">— بدون —</option>
-          ${orders.map((o) => `<option value="${esc(o.id)}">${esc(o.code)} · ${esc(o.model_name)}</option>`).join('')}</select></div>
-      <div style="margin-top:12px"><button class="btn btn-primary" id="xGo">حفظ المصروف</button></div>
     </div>
 
-    <h2>المصروفات المسجلة</h2>
+    <div class="kpi" style="max-width:280px">
+      <div class="lbl">إجمالي المصروفات</div>
+      <div class="val">${money(total)}</div>
+    </div>
+
+    <h2>المصروفات</h2>
     ${tbl([
       { label: 'التاريخ', render: (r) => dateAr(r.expense_date) },
-      { label: 'التصنيف', render: (r) => esc(txnCategoryAr(r.category)) },
+      { label: 'البند', render: (r) => esc(txnCategoryAr(r.category)) },
       { label: 'الوصف', key: 'description', wrap: true },
+      { label: 'الأمر', render: (r) => {
+        const o = orders.find((x) => x.id === r.order_id);
+        return o ? `<a class="link mono" href="#order/${esc(o.id)}">${esc(o.code)}</a>` : '<span class="hint">—</span>';
+      } },
       { label: 'المبلغ', num: true, render: (r) => money(r.amount) },
-    ], expenses, 'مفيش مصروفات')}`;
+    ], rows, 'مفيش مصروفات في الفترة دي')}
 
-  $('#xGo').onclick = async () => {
+    <h2>بنود المصروفات</h2>
+    <div class="chips">${cats.length
+      ? cats.map((c) => {
+        const n = expenses.filter((e) => e.category === c).length;
+        return `<span class="chip">${esc(c)} ${num(n)}</span>`;
+      }).join('')
+      : '<span class="hint">مفيش بنود لسه</span>'}</div>`;
+
+  const applyFilter = () => {
+    window.__expFilter = {
+      from: $('#xfFrom').value, to: $('#xfTo').value,
+      cat: $('#xfCat').value, order: $('#xfOrder').value,
+    };
+    pageExpenses();
+  };
+  ['#xfFrom', '#xfTo', '#xfCat', '#xfOrder'].forEach((sel) => {
+    $(sel).onchange = applyFilter;
+  });
+
+  $('#xNew').onclick = async () => {
+    const picked = await formDialog('مصروف جديد', [
+      { key: 'category', label: 'البند', required: true, value: f.cat || '',
+        options: cats.map((c) => ({ value: c, label: c })) },
+      { key: 'amount', label: 'المبلغ', type: 'number', min: 0, step: '0.01', required: true },
+      { key: 'account', label: 'من حساب',
+        options: (META.accounts || []).map((a) => ({ value: a.id, label: a.name })) },
+      { key: 'description', label: 'الوصف' },
+      { key: 'order', label: 'على أمر (اختياري)',
+        options: [{ value: '', label: '— بدون —' },
+          ...orders.map((o) => ({ value: o.id, label: `${o.code} · ${o.model_name || ''}` }))] },
+    ]);
+    if (!picked) return;
     try {
       await rpc('rpc_create_expense', {
-        p_account: $('#xAcct').value,
-        p_category: $('#xCat').value.trim() || 'عام',
-        p_description: $('#xDesc').value.trim(),
-        p_amount: Number($('#xAmt').value || 0),
-        p_order: $('#xOrder').value || null,
+        p_account: picked.account,
+        p_category: picked.category.trim() || 'عام',
+        p_description: picked.description || '',
+        p_amount: Number(picked.amount || 0),
+        p_order: picked.order || null,
       });
+      notify('اتسجل المصروف');
       pageExpenses();
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -2382,61 +3212,152 @@ async function pageSupplies() {
     table('items'), table('warehouses'), table('inventory_transactions'),
     view('stock'), view('customers'),
   ]);
+
+  const factoryStock = stock.filter((r) => r.ownership !== 'customer' && Number(r.quantity) !== 0);
+  const customerStock = stock.filter((r) => r.ownership === 'customer' && Number(r.quantity) !== 0);
+  const purchases = moves.filter((m) => m.movement === 'purchase').slice(0, 20);
   const itemName = (id) => items.find((i) => i.id === id)?.name || '—';
-  const whName = (id) => warehouses.find((w) => w.id === id)?.name || '—';
-  const options = (rows, label, value = 'id') => rows.map((r) =>
-    `<option value="${esc(r[value])}">${esc(label(r))}</option>`).join('');
 
   app.innerHTML = `
-    <h1>المستلزمات</h1>
-    <p class="sub">مستلزمات المصنع ومستلزمات العملاء (خيوط، أزرار، سحابات، تغليف)</p>
+    ${pageHead('المستلزمات',
+      'خيط وزراير وسوست وتغليف وقطع غيار — بتاعة المصنع واللي جاية من العملاء')}
 
-    <div class="card">
-      <h2 style="margin-top:0">صنف جديد</h2>
+    <div class="toolbar">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="sBuy">شراء مستلزمات</button>
+        <button class="btn btn-ghost" id="sRecv">استلام من عميل</button>
+        <button class="btn btn-ghost" id="sIssue">صرف مستلزمات</button>
+      </div>
+      <a class="btn btn-ghost btn-sm" href="#supplies-admin">إدارة الأصناف والمخازن</a>
+    </div>
+
+    <h2>الرصيد</h2>
+    ${tbl([
+      { label: 'الصنف', render: (r) => esc(r.item_name) },
+      { label: 'المخزن', render: (r) => esc(r.warehouse_name) },
+      { label: 'الرصيد', num: true, render: (r) => `${num(r.quantity)} ${esc(r.base_unit || '')}` },
+    ], factoryStock, 'مفيش مستلزمات لسه')}
+
+    <h2>مستلزمات العملاء</h2>
+    <p class="hint">بتتصرف على أوامر العميل نفسه بس، ومن غير تكلفة</p>
+    ${tbl([
+      { label: 'العميل', render: (r) => esc(r.customer_name || '—') },
+      { label: 'الصنف', render: (r) => `${esc(r.item_name)} <span class="hint mono">${esc(r.item_code || '')}</span>` },
+      { label: 'الرصيد', num: true, render: (r) => `${num(r.quantity)}${esc(r.base_unit || '')}` },
+    ], customerStock, 'مفيش مستلزمات عملاء')}
+
+    <h2>آخر المشتريات</h2>
+    ${tbl([
+      { label: 'التاريخ', render: (r) => dateAr(r.txn_date) },
+      { label: 'الصنف', render: (r) => esc(itemName(r.item_id)) },
+      { label: 'الكمية', num: true, render: (r) => num(r.quantity) },
+      { label: 'ملاحظات', render: (r) => esc(r.notes || '—') },
+    ], purchases, 'مفيش مشتريات لسه')}`;
+
+  const opts = (rows, label, blank) => (blank ? `<option value="">${esc(blank)}</option>` : '')
+    + rows.map((r) => `<option value="${esc(r.id)}">${esc(label(r))}</option>`).join('');
+
+  $('#sBuy').onclick = async () => {
+    const accounts = await view('accounts');
+    const v = await formDialog('شراء مستلزمات', [
+      { key: 'item', label: 'الصنف', options: items.map((i) => ({ value: i.id, label: i.name })) },
+      { key: 'warehouse', label: 'المخزن', options: warehouses.map((w) => ({ value: w.id, label: w.name })) },
+      { key: 'quantity', label: 'الكمية', type: 'number', min: 0, step: '0.001', required: true },
+      { key: 'unit_cost', label: 'سعر الوحدة', type: 'number', min: 0, step: '0.01', value: '0' },
+      { key: 'account', label: 'الخزنة', options: accounts.map((a) => ({ value: a.id, label: a.name })) },
+      { key: 'notes', label: 'ملاحظات' },
+    ]);
+    if (!v) return;
+    try {
+      await rpc('rpc_purchase_supplies', {
+        p_item: v.item, p_warehouse: v.warehouse,
+        p_quantity: Number(v.quantity || 0),
+        p_unit_cost: Number(v.unit_cost || 0), p_account: v.account,
+        p_notes: v.notes || null,
+      });
+      notify('اتسجلت المشترى');
+      pageSupplies();
+    } catch (e) { notifyErr(humanError(e)); }
+  };
+
+  $('#sRecv').onclick = async () => {
+    const v = await formDialog('استلام مستلزمات من عميل', [
+      { key: 'customer', label: 'العميل', required: true,
+        options: customers.map((c) => ({ value: c.id, label: c.name })) },
+      { key: 'item', label: 'الصنف', options: items.map((i) => ({ value: i.id, label: i.name })) },
+      { key: 'warehouse', label: 'المخزن', options: warehouses.map((w) => ({ value: w.id, label: w.name })) },
+      { key: 'quantity', label: 'الكمية', type: 'number', min: 0, step: '0.001', required: true },
+      { key: 'notes', label: 'ملاحظات' },
+    ]);
+    if (!v) return;
+    try {
+      await rpc('rpc_receive_customer_supplies', {
+        p_customer: v.customer, p_item: v.item, p_warehouse: v.warehouse,
+        p_quantity: Number(v.quantity || 0), p_notes: v.notes || null,
+      });
+      notify('اتسجل الاستلام');
+      pageSupplies();
+    } catch (e) { notifyErr(humanError(e)); }
+  };
+
+  $('#sIssue').onclick = async () => {
+    const orders = await view('orders');
+    const v = await formDialog('صرف مستلزمات', [
+      { key: 'item', label: 'الصنف', options: items.map((i) => ({ value: i.id, label: i.name })) },
+      { key: 'warehouse', label: 'المخزن', options: warehouses.map((w) => ({ value: w.id, label: w.name })) },
+      { key: 'quantity', label: 'الكمية', type: 'number', min: 0, step: '0.001', required: true },
+      { key: 'ownership', label: 'الملكية', options: [
+        { value: 'factory', label: 'مستلزمات المصنع' },
+        { value: 'customer', label: 'مستلزمات عميل' },
+      ] },
+      { key: 'customer', label: 'العميل', options: [{ value: '', label: '—' },
+        ...customers.map((c) => ({ value: c.id, label: c.name }))] },
+      { key: 'order', label: 'الأمر (اختياري)', options: [{ value: '', label: '—' },
+        ...orders.map((o) => ({ value: o.id, label: `${o.code} · ${o.model_name || ''}` }))] },
+      { key: 'notes', label: 'ملاحظات' },
+    ]);
+    if (!v) return;
+    try {
+      await rpc('rpc_issue_supplies', {
+        p_item: v.item, p_warehouse: v.warehouse,
+        p_quantity: Number(v.quantity || 0),
+        p_ownership: v.ownership,
+        p_customer: v.customer || null,
+        p_order: v.order || null,
+        p_notes: v.notes || null,
+      });
+      notify('اتسجل الصرف');
+      pageSupplies();
+    } catch (e) { notifyErr(humanError(e)); }
+  };
+}
+
+/* إدارة الأصناف والمخازن والتحويلات — منفصلة عن شاشة الحركة اليومية. */
+async function pageSuppliesAdmin() {
+  loading();
+  const [items, warehouses, moves, accounts] = await Promise.all([
+    table('items'), table('warehouses'), table('inventory_transactions'), view('accounts'),
+  ]);
+  const itemName = (id) => items.find((i) => i.id === id)?.name || '—';
+  const whName = (id) => warehouses.find((w) => w.id === id)?.name || '—';
+
+  app.innerHTML = `
+    ${pageHead('إدارة المستلزمات', 'الأصناف والمخازن والتحويلات')}
+
+    <h2>صنف جديد</h2>
+    <div class="card tight">
       <div class="grid g4">
-        <div><label class="label">الاسم</label><input id="iName" class="input" placeholder="خيط أبيض"></div>
-        <div><label class="label">التصنيف</label>
-          <select id="iCat">${Object.entries(ITEM_CATEGORIES).map(([k, v]) =>
+        <div><label class="label" for="iName">الاسم</label>
+          <input id="iName" class="input" placeholder="خيط أبيض"></div>
+        <div><label class="label" for="iCat">التصنيف</label>
+          <select id="iCat" class="input">${Object.entries(ITEM_CATEGORIES).map(([k, v]) =>
             `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
-        <div><label class="label">الوحدة</label><input id="iUnit" class="input" value="قطعة"></div>
+        <div><label class="label" for="iUnit">الوحدة</label>
+          <input id="iUnit" class="input" value="قطعة"></div>
         <div style="display:flex;align-items:flex-end">
           <button class="btn btn-primary" id="iGo" style="width:100%">إضافة</button></div>
       </div>
     </div>
-
-    <div class="card">
-      <h2 style="margin-top:0">حركة مستلزمات</h2>
-      <div class="grid g3">
-        <div><label class="label">نوع الحركة</label>
-          <select id="mKind">
-            <option value="purchase">شراء مستلزمات</option>
-            <option value="customer">استلام من عميل</option>
-            <option value="issue">صرف مستلزمات</option>
-          </select></div>
-        <div><label class="label">الصنف</label><select id="mItem">${options(items, (i) => i.name)}</select></div>
-        <div><label class="label">المخزن</label><select id="mWh">${options(warehouses, (w) => w.name)}</select></div>
-        <div><label class="label">الكمية</label><input id="mQty" class="input" type="number" min="0" step="0.001"></div>
-        <div id="mCostWrap"><label class="label">سعر الوحدة</label><input id="mCost" class="input" type="number" min="0" step="0.01" value="0"></div>
-        <div id="mAccWrap"><label class="label">الخزنة</label><select id="mAcc"></select></div>
-        <div id="mCustWrap" style="display:none"><label class="label">العميل</label>
-          <select id="mCust"><option value="">— مستلزمات المصنع —</option>${options(customers, (c) => c.name)}</select></div>
-        <div id="mOrderWrap" style="display:none"><label class="label">الأمر (اختياري)</label>
-          <select id="mOrder"><option value="">—</option></select></div>
-      </div>
-      <div style="margin-top:12px"><label class="label">ملاحظات</label><input id="mNotes" class="input"></div>
-      <div style="margin-top:12px"><button class="btn btn-primary" id="mGo">تسجيل الحركة</button></div>
-    </div>
-
-    <h2>الأرصدة</h2>
-    ${tbl([
-      { label: 'الصنف', render: (r) => esc(r.item_name) },
-      { label: 'المخزن', render: (r) => esc(r.warehouse_name) },
-      { label: 'الملكية', render: (r) => (r.ownership === 'customer'
-        ? 'عميل · ' + esc(r.customer_name || '—') : 'مصنع') },
-      { label: 'الرصيد', num: true, render: (r) => num(r.quantity) + ' ' + esc(r.base_unit || '') },
-      { label: 'وارد', num: true, render: (r) => num(r.received_quantity) },
-      { label: 'صرف', num: true, render: (r) => num(r.issued_quantity) },
-    ], stock, 'مفيش أرصدة')}
 
     <h2>الأصناف</h2>
     ${tbl([
@@ -2449,12 +3370,13 @@ async function pageSupplies() {
       { label: '', render: (r) => `<button class="btn btn-sm btn-ghost" data-item="${esc(r.id)}">تعديل</button>` },
     ], items, 'مفيش أصناف')}
 
-    <h2>المخازن</h2>
+    <h2>مخزن جديد</h2>
     <div class="card tight">
       <div class="grid g3">
-        <div><label class="label">اسم المخزن</label><input id="whName" class="input" placeholder="مخزن التغليف"></div>
-        <div><label class="label">النوع</label>
-          <select id="whKind">
+        <div><label class="label" for="whName">اسم المخزن</label>
+          <input id="whName" class="input" placeholder="مخزن التغليف"></div>
+        <div><label class="label" for="whKind">النوع</label>
+          <select id="whKind" class="input">
             <option value="factory_consumables">مستلزمات المصنع</option>
             <option value="customer_fabric">قماش العملاء</option>
             <option value="customer_supplies">مستلزمات العملاء</option>
@@ -2465,6 +3387,8 @@ async function pageSupplies() {
           <button class="btn btn-primary" id="whGo" style="width:100%">إضافة مخزن</button></div>
       </div>
     </div>
+
+    <h2>المخازن</h2>
     ${tbl([
       { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
       { label: 'الاسم', key: 'name' },
@@ -2475,10 +3399,10 @@ async function pageSupplies() {
     <h2>تحويل بين المخازن</h2>
     <div class="card tight">
       <div class="grid g4">
-        <div><label class="label">الصنف</label><select id="trItem"></select></div>
-        <div><label class="label">من مخزن</label><select id="trFrom"></select></div>
-        <div><label class="label">إلى مخزن</label><select id="trTo"></select></div>
-        <div><label class="label">الكمية</label>
+        <div><label class="label" for="trItem">الصنف</label><select id="trItem" class="input"></select></div>
+        <div><label class="label" for="trFrom">من مخزن</label><select id="trFrom" class="input"></select></div>
+        <div><label class="label" for="trTo">إلى مخزن</label><select id="trTo" class="input"></select></div>
+        <div><label class="label" for="trQty">الكمية</label>
           <input id="trQty" class="input" type="number" min="0" step="0.001"></div>
       </div>
       <div style="margin-top:12px"><button class="btn btn-primary" id="trGo">تحويل</button></div>
@@ -2497,44 +3421,23 @@ async function pageSupplies() {
 
   $('#iGo').onclick = async () => {
     const name = $('#iName').value.trim();
-    if (!name) { alert('اكتب اسم الصنف'); return; }
+    if (!name) { notify('اكتب اسم الصنف'); return; }
     try {
       await rpc('rpc_create_item', {
         p_name: name, p_category: $('#iCat').value,
         p_unit: $('#iUnit').value.trim() || 'قطعة',
       });
-      pageSupplies();
-    } catch (e) { alert(humanError(e)); }
-  };
-
-  const accounts = await view('accounts');
-  $('#mAcc').innerHTML = options(accounts, (a) => a.name);
-  const paintKind = () => {
-    const k = $('#mKind').value;
-    $('#mCostWrap').style.display = k === 'purchase' ? '' : 'none';
-    $('#mAccWrap').style.display = k === 'purchase' ? '' : 'none';
-    $('#mCustWrap').style.display = k === 'issue' ? '' : (k === 'customer' ? '' : 'none');
-    $('#mOrderWrap').style.display = k === 'issue' ? '' : 'none';
-  };
-  paintKind();
-  $('#mKind').onchange = paintKind;
-
-  // The order picker narrows to the selected customer's orders when issuing
-  // customer-owned supplies, since those may only go to that customer.
-  $('#mCust').onchange = async () => {
-    const cid = $('#mCust').value;
-    const orders = (await view('orders')).filter((o) => o.customer_id === cid);
-    $('#mOrder').innerHTML = '<option value="">—</option>' + options(orders,
-      (o) => `${o.code} · ${o.model_name}`, 'id');
+      pageSuppliesAdmin();
+    } catch (e) { notifyErr(humanError(e)); }
   };
 
   $('#whGo').onclick = async () => {
     const name = $('#whName').value.trim();
-    if (!name) { alert('اكتب اسم المخزن'); return; }
+    if (!name) { notify('اكتب اسم المخزن'); return; }
     try {
       await rpc('rpc_create_warehouse', { p_name: name, p_kind: $('#whKind').value });
-      pageSupplies();
-    } catch (e) { alert(humanError(e)); }
+      pageSuppliesAdmin();
+    } catch (e) { notifyErr(humanError(e)); }
   };
 
   app.querySelectorAll('[data-item]').forEach((b) => {
@@ -2548,27 +3451,23 @@ async function pageSupplies() {
       if (!v) return;
       try {
         await rpc('rpc_update_item', {
-          p_id: it.id,
-          p_name: v.name,
-          p_category: v.category || null,
-          p_unit: v.unit || null,
+          p_id: it.id, p_name: v.name,
+          p_category: v.category || null, p_unit: v.unit || null,
         });
-        pageSupplies();
-      } catch (e) { alert(humanError(e)); }
+        pageSuppliesAdmin();
+      } catch (e) { notifyErr(humanError(e)); }
     };
   });
 
   app.querySelectorAll('[data-wh]').forEach((b) => {
     b.onclick = async () => {
       const w = warehouses.find((x) => x.id === b.dataset.wh);
-      const v = await formDialog('تعديل المخزن', [
-        { key: 'name', label: 'اسم المخزن', value: w.name },
-      ]);
+      const v = await formDialog('تعديل المخزن', [{ key: 'name', label: 'اسم المخزن', value: w.name }]);
       if (!v) return;
       try {
         await rpc('rpc_update_warehouse', { p_id: w.id, p_name: v.name });
-        pageSupplies();
-      } catch (e) { alert(humanError(e)); }
+        pageSuppliesAdmin();
+      } catch (e) { notifyErr(humanError(e)); }
     };
   });
 
@@ -2583,10 +3482,10 @@ async function pageSupplies() {
     const qty = Number($('#trQty').value || 0);
     const from = $('#trFrom').value;
     const to = $('#trTo').value;
-    if (!qty || qty <= 0) { alert('اكتب كمية صحيحة'); return; }
-    if (from === to) { alert('اختار مخزنين مختلفين'); return; }
+    if (!qty || qty <= 0) { notify('اكتب كمية صحيحة'); return; }
+    if (from === to) { notify('اختار مخزنين مختلفين'); return; }
     try {
-      // A transfer is two postings so the ledger keeps a matching pair.
+      /* التحويل قيدين متقابلين عشان دفتر المخزن يفضل متوازن. */
       await rpc('rpc_move_stock', {
         p_item: $('#trItem').value, p_warehouse: from,
         p_quantity: -Math.abs(qty), p_movement: 'transfer_out',
@@ -2595,34 +3494,8 @@ async function pageSupplies() {
         p_item: $('#trItem').value, p_warehouse: to,
         p_quantity: Math.abs(qty), p_movement: 'transfer_in',
       });
-      pageSupplies();
-    } catch (e) { alert(humanError(e)); }
-  };
-
-  $('#mGo').onclick = async () => {
-    const kind = $('#mKind').value;
-    const qty = Number($('#mQty').value || 0);
-    if (!qty || qty <= 0) { alert('اكتب كمية صحيحة'); return; }
-    const args = {
-      p_item: $('#mItem').value, p_warehouse: $('#mWh').value, p_quantity: qty,
-      p_notes: $('#mNotes').value.trim() || null,
-    };
-    try {
-      if (kind === 'purchase') {
-        await rpc('rpc_purchase_supplies', {
-          ...args, p_unit_cost: Number($('#mCost').value || 0), p_account: $('#mAcc').value,
-        });
-      } else if (kind === 'customer') {
-        await rpc('rpc_receive_customer_supplies', { ...args, p_customer: $('#mCust').value });
-      } else {
-        await rpc('rpc_issue_supplies', {
-          ...args, p_ownership: $('#mCust').value ? 'customer' : 'factory',
-          p_customer: $('#mCust').value || null,
-          p_order: $('#mOrder').value || null,
-        });
-      }
-      pageSupplies();
-    } catch (e) { alert(humanError(e)); }
+      pageSuppliesAdmin();
+    } catch (e) { notifyErr(humanError(e)); }
   };
 }
 
@@ -2633,7 +3506,7 @@ async function pageMachines() {
   loading();
   const [machines, maint] = await Promise.all([table('machines'), table('machine_maintenance')]);
   app.innerHTML = `
-    <h1>الماكينات</h1>
+    ${pageHead('الماكينات', 'الماكينات والصيانة')}
 
     <div class="card">
       <h2 style="margin-top:0">ماكينة جديدة</h2>
@@ -2680,26 +3553,26 @@ async function pageMachines() {
     `<option value="${esc(m.id)}">${esc(m.name)} · ${esc(m.code)}</option>`).join('');
   $('#mtGo').onclick = async () => {
     const desc = $('#mtDesc').value.trim();
-    if (!desc) { alert('اكتب وصف الصيانة'); return; }
-    if (!$('#mtMachine').value) { alert('ضيف ماكينة الأول'); return; }
+    if (!desc) { notify('اكتب وصف الصيانة'); return; }
+    if (!$('#mtMachine').value) { notify('ضيف ماكينة الأول'); return; }
     try {
       await rpc('rpc_log_maintenance', {
         p_machine: $('#mtMachine').value, p_description: desc,
         p_cost: Number($('#mtCost').value || 0), p_date: $('#mtDate').value || null,
       });
       pageMachines();
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 
   $('#mGo').onclick = async () => {
     const name = $('#mName').value.trim();
-    if (!name) { alert('اكتب اسم الماكينة'); return; }
+    if (!name) { notify('اكتب اسم الماكينة'); return; }
     try {
       await rpc('rpc_create_machine', {
         p_name: name, p_model: $('#mModel').value.trim() || null,
         p_purchased_on: $('#mDate').value || null });
       pageMachines();
-    } catch (e) { alert(humanError(e)); }
+    } catch (e) { notifyErr(humanError(e)); }
   };
 
   app.querySelectorAll('[data-mach]').forEach((b) => {
@@ -2715,7 +3588,7 @@ async function pageMachines() {
           p_id: m.id, p_name: v.name, p_model: v.model || null,
         });
         pageMachines();
-      } catch (e) { alert(humanError(e)); }
+      } catch (e) { notifyErr(humanError(e)); }
     };
   });
 }
@@ -2723,37 +3596,244 @@ async function pageMachines() {
 /* ============================================================================
    لوحة المدير
    ========================================================================== */
+/* لوحة المدير: نفس بنية المرجع — فترات، 5 مؤشرات، رسم يومي، مراحل وأسباب
+   الرفض، أسبوعي خلص/اتسلّم، والأوامر اللي اتقفلت في الفترة. */
+const ANALYTICS_PERIODS = [
+  ['this_month', 'الشهر ده'],
+  ['last30', 'آخر 30 يوم'],
+  ['last90', 'آخر 3 شهور'],
+  ['custom', 'فترة مخصوصة'],
+];
+
+function analyticsRange(key, from, to) {
+  if (key === 'custom' && from && to) return [from, to];
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const back = (n) => { const x = new Date(today); x.setDate(x.getDate() - n); return iso(x); };
+  if (key === 'last30') return [back(29), iso(today)];
+  if (key === 'last90') return [back(89), iso(today)];
+  return [iso(new Date(today.getFullYear(), today.getMonth(), 1)), iso(today)];
+}
+
+/* شريط أفقي بسيط بدل مكتبة رسوم: المرجع بيرسم أعمدة يومية،
+   وده نفس الشكل من غير أي اعتماد خارجي. */
+function barChart(days, height) {
+  const max = Math.max(1, ...days.map((d) => d.accepted + d.rejected));
+  return `<div class="chart" style="height:${height || 130}px">
+    ${days.map((d) => {
+      const total = d.accepted + d.rejected;
+      const h = Math.round(total / max * 100);
+      return `<div class="chart-col" title="${esc(d.label)}: مقبول ${d.accepted}، مرفوض ${d.rejected}">
+        <div class="chart-bar" style="height:${h}%">
+          ${d.rejected ? `<i class="rej" style="height:${Math.round(d.rejected / Math.max(1, total) * 100)}%"></i>` : ''}
+        </div>
+        <span class="chart-lbl">${esc(d.tick || '')}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 async function pageAnalytics() {
   loading();
-  const [orders, workers, costing] = await Promise.all([view('orders'), view('workers'), view('costing')]);
-  const expected = costing.reduce((s, c) => s + Number(c.expected_revenue), 0);
-  const cost = costing.reduce((s, c) => s + Number(c.total_cost), 0);
-  const acc = workers.reduce((s, w) => s + Number(w.accepted_total), 0);
-  const rej = workers.reduce((s, w) => s + Number(w.rejected_total), 0);
-  const rejPct = acc + rej > 0 ? Math.round(rej / (acc + rej) * 100) : 0;
+  const period = window.__anPeriod || 'this_month';
+  const [defFrom, defTo] = analyticsRange(period);
+  const from = window.__anFrom || defFrom;
+  const to = window.__anTo || defTo;
+
+  const [assigns, orders, costing, deliveries, deliveryLines, bundles] = await Promise.all([
+    table('work_assignments'), view('orders'), view('costing'),
+    table('deliveries'), table('delivery_lines'), view('bundles'),
+  ]);
+
+  const inPeriod = assigns.filter((a) => a.received_at && inRange(a.received_at, from, to));
+  const acc = inPeriod.reduce((s, a) => s + Number(a.accepted_qty || 0), 0);
+  const rej = inPeriod.reduce((s, a) => s + Number(a.rejected_qty || 0), 0);
+  const reworkTotal = inPeriod.reduce((s, a) => s + Number(a.rework_qty || 0), 0);
+  const rejPct = acc + rej > 0 ? (rej / (acc + rej) * 100) : 0;
+
+  /* «خلص» = شنط اتسلّمت من الإنتاج في الفترة. «اتسلّم» = بنود أذون التسليم. */
+  const ready = bundles
+    .filter((b) => b.status === 'finished' || b.status === 'delivered')
+    .filter((b) => inRange(b.updated_at || b.cut_date, from, to))
+    .reduce((s, b) => s + Number(b.quantity || 0), 0);
+
+  const deliveryByDay = {};
+  deliveries.filter((d) => inRange(d.delivered_on, from, to)).forEach((d) => {
+    const qty = deliveryLines.filter((l) => l.delivery_id === d.id)
+      .reduce((s, l) => s + Number(l.quantity || 0), 0);
+    const day = String(d.delivered_on).slice(0, 10);
+    deliveryByDay[day] = (deliveryByDay[day] || 0) + qty;
+  });
+  const delivered = Object.values(deliveryByDay).reduce((s, q) => s + q, 0);
+
+  const closed = orders.filter((o) => o.status === 'completed'
+    && inRange(o.closed_at || o.order_date, from, to));
+  const closedProfit = closed.reduce((s, o) => {
+    const c = costing.find((x) => (x.order_id || x.id) === o.id);
+    if (!c) return s;
+    return s + (Number(c.actual_revenue || 0) - Number(c.total_cost || 0));
+  }, 0);
+
+  /* الرسم اليومي: بنملأ كل يوم في الفترة حتى الأيام اللي مافيهاش شغل تبان فاضية. */
+  const byDay = {};
+  inPeriod.forEach((a) => {
+    const d = String(a.received_at).slice(0, 10);
+    byDay[d] = byDay[d] || { accepted: 0, rejected: 0 };
+    byDay[d].accepted += Number(a.accepted_qty || 0);
+    byDay[d].rejected += Number(a.rejected_qty || 0);
+  });
+  const dayList = [];
+  const cursor = new Date(from + 'T00:00:00');
+  const end = new Date(to + 'T00:00:00');
+  let guard = 0;
+  while (cursor <= end && guard < 400) {
+    const key = cursor.toISOString().slice(0, 10);
+    const row = byDay[key] || { accepted: 0, rejected: 0 };
+    dayList.push({ label: dateAr(key), tick: key.slice(8, 10) + '/' + key.slice(5, 7), ...row });
+    cursor.setDate(cursor.getDate() + 1);
+    guard += 1;
+  }
+  const activeDays = dayList.filter((d) => d.accepted + d.rejected > 0);
+  const best = dayList.reduce((b, d) => (d.accepted > (b ? b.accepted : -1) ? d : b), null);
+
+  /* المراحل الأكتر رفضاً — نسبة الرفض من إجمالي اللي دخل المرحلة. */
+  const stageAgg = {};
+  inPeriod.filter((a) => Number(a.rejected_qty) > 0).forEach((a) => {
+    stageAgg[a.stage_code] = stageAgg[a.stage_code] || { code: a.stage_code, rej: 0, tot: 0 };
+    stageAgg[a.stage_code].rej += Number(a.rejected_qty || 0);
+  });
+  inPeriod.forEach((a) => {
+    if (!stageAgg[a.stage_code]) return;
+    stageAgg[a.stage_code].tot += Number(a.accepted_qty || 0) + Number(a.rejected_qty || 0);
+  });
+  const stageList = Object.values(stageAgg)
+    .map((s) => ({ name: stageAr(s.code), rej: s.rej,
+      pct: s.tot ? (s.rej / s.tot * 100) : 0 }))
+    .sort((a, b) => b.rej - a.rej);
+
+  const reasonAgg = {};
+  inPeriod.filter((a) => Number(a.rejected_qty) > 0).forEach((a) => {
+    const r = (a.reject_reason || '').trim() || 'من غير سبب مسجّل';
+    reasonAgg[r] = (reasonAgg[r] || 0) + Number(a.rejected_qty);
+  });
+  const reasonList = Object.entries(reasonAgg)
+    .map(([reason, qty]) => ({ reason, qty }))
+    .sort((a, b) => b.qty - a.qty);
+
+  /* أسابيع الفترة، كل أسبوع بيبدأ السبت. */
+  const weeks = [];
+  const wCursor = new Date(from + 'T00:00:00');
+  const wEnd = new Date(to + 'T00:00:00');
+  let wGuard = 0;
+  while (wCursor <= wEnd && wGuard < 60) {
+    const start = new Date(wCursor);
+    const stop = new Date(wCursor);
+    stop.setDate(stop.getDate() + (6 - ((start.getDay() + 1) % 7)));
+    if (stop > wEnd) stop.setTime(wEnd.getTime());
+    const s = start.toISOString().slice(0, 10);
+    const e = stop.toISOString().slice(0, 10);
+    const dayCount = Math.round((stop - start) / 86400000) + 1;
+    const wReady = bundles
+      .filter((b) => b.status === 'finished' || b.status === 'delivered')
+      .filter((b) => inRange(b.updated_at || b.cut_date, s, e))
+      .reduce((sum, b) => sum + Number(b.quantity || 0), 0);
+    const wDelivered = Object.entries(deliveryByDay)
+      .filter(([day]) => day >= s && day <= e)
+      .reduce((sum, [, q]) => sum + q, 0);
+    weeks.push({ s, e, ready: wReady, delivered: wDelivered, days: dayCount });
+    wCursor.setDate(wCursor.getDate() + dayCount);
+    wGuard += 1;
+  }
 
   app.innerHTML = `
-    <h1>لوحة المدير</h1>
-    <p class="sub">مؤشرات الأداء</p>
-    <div class="grid g3">
-      <div class="kpi"><div class="lbl">قطع مقبولة</div><div class="val">${num(acc)}</div></div>
-      <div class="kpi"><div class="lbl">نسبة الرفض</div><div class="val">${rejPct}%</div></div>
-      <div class="kpi"><div class="lbl">الإيراد المتوقع</div><div class="val" style="font-size:1.2rem">${money(expected)}</div></div>
-      <div class="kpi"><div class="lbl">إجمالي التكلفة</div><div class="val" style="font-size:1.2rem">${money(cost)}</div></div>
-      <div class="kpi"><div class="lbl">الربح المتوقع</div><div class="val" style="font-size:1.2rem">${money(expected - cost)}</div></div>
-      <div class="kpi"><div class="lbl">عدد الأوامر</div><div class="val">${num(orders.length)}</div></div>
+    ${pageHead('لوحة المدير', '')}
+    <p class="hint" style="margin-top:-6px">من ${dateAr(from)} لحد ${dateAr(to)}</p>
+
+    <div class="card" style="padding:12px;margin-bottom:14px">
+      <div class="grid g3">
+        <div><label class="label" for="anPeriod">الفترة</label>
+          <select class="input" id="anPeriod">${ANALYTICS_PERIODS.map(([k, l]) =>
+            `<option value="${k}"${k === period ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+        <div><label class="label" for="anFrom">من</label>
+          <input class="input" id="anFrom" type="date" value="${esc(from)}"></div>
+        <div><label class="label" for="anTo">إلى</label>
+          <input class="input" id="anTo" type="date" value="${esc(to)}"></div>
+      </div>
     </div>
 
-    <h2>ربحية الأوامر</h2>
+    <div class="grid g3">
+      <div class="kpi"><div class="lbl">مقبول</div><div class="val">${num(acc)}</div></div>
+      <div class="kpi"><div class="lbl">نسبة المرفوض</div><div class="val">${rejPct.toFixed(1)}%</div></div>
+      <div class="kpi"><div class="lbl">خلص</div><div class="val">${num(ready)}</div></div>
+      <div class="kpi"><div class="lbl">اتسلّم</div><div class="val">${num(delivered)}</div></div>
+      <div class="kpi"><div class="lbl">ربح الأوامر المقفولة</div>
+        <div class="val" style="font-size:1.2rem">${money(closedProfit)}</div></div>
+    </div>
+
+    <h2>الإنتاج اليومي</h2>
+    <div class="card">
+      <div class="legend"><span><i class="dot ok"></i>مقبول</span><span><i class="dot bad"></i>مرفوض</span></div>
+      ${barChart(dayList)}
+      <p class="hint" style="margin-bottom:0">${activeDays.length
+        ? `${num(activeDays.length)} يوم فيهم استلام من ${num(dayList.length)}. مقبول ${num(acc)}، مرفوض ${num(rej)} (${rejPct.toFixed(1)}%)، إعادة ${num(reworkTotal)}. أعلى يوم ${esc(best.label)}: ${num(best.accepted)} مقبول.`
+        : 'مفيش استلام في الفترة دي'}</p>
+      ${dayList.length ? `<p class="hint">أعلى يوم = ${num(best ? best.accepted : 0)} قطعة</p>` : ''}
+    </div>
+
+    <h2>المراحل الأكتر رفضاً</h2>
+    ${stageList.length ? tbl([
+      { label: 'المرحلة', key: 'name' },
+      { label: 'المرفوض', num: true, render: (r) => num(r.rej) },
+      { label: 'النسبة', num: true, render: (r) => `${r.pct.toFixed(1)}%` },
+    ], stageList) : '<div class="card"><b>مفيش مرحلة فيها مرفوض</b><p class="hint" style="margin-bottom:0">مفيش مرفوض في الفترة دي</p></div>'}
+
+    <h2>أسباب الرفض</h2>
+    ${reasonList.length ? tbl([
+      { label: 'السبب', render: (r) => esc(r.reason), wrap: true },
+      { label: 'العدد', num: true, render: (r) => num(r.qty) },
+    ], reasonList) : '<div class="card"><b>مفيش مرفوض</b><p class="hint" style="margin-bottom:0">مفيش مرفوض في الفترة دي</p></div>'}
+
+    <h2>خلص واتسلّم كل أسبوع</h2>
+    <div class="card">
+      <div class="legend"><span><i class="dot ok"></i>خلص</span><span><i class="dot brand"></i>اتسلّم</span></div>
+      <p class="hint" style="margin-top:0">خلص ${num(ready)} قطعة واتسلّم ${num(delivered)} على ${num(weeks.length)} أسبوع.</p>
+      <div class="wk-list">
+        ${weeks.map((w) => `<div class="wk">
+          <div class="wk-head"><b>${num(w.ready)}</b> / <b>${num(w.delivered)}</b></div>
+          <div class="wk-lbl">${dateAr(w.s)}–${dateAr(w.e)}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <h2>الأوامر اللي خلصت في الفترة</h2>
+    <p class="hint" style="margin-top:-4px">الإيراد = المسلَّم ناقص المرتجع × سعر القطعة. التكلفة = الأجور + الخامات + الشحن + المصروفات المباشرة + نصيبه من المصروفات العامة.</p>
     ${tbl([
-      { label: 'الأمر', key: 'code' },
-      { label: 'الإيراد المتوقع', num: true, render: (r) => money(r.expected_revenue) },
-      { label: 'التكلفة', num: true, render: (r) => money(r.total_cost) },
+      { label: 'الأمر', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+      { label: 'العميل', key: 'customer_name' },
+      { label: 'الكمية', num: true, render: (r) => num(r.quantity) },
+      { label: 'الإيراد', num: true, render: (r) => {
+        const c = costing.find((x) => (x.order_id || x.id) === r.id) || {};
+        return money(c.actual_revenue);
+      } },
+      { label: 'التكلفة', num: true, render: (r) => {
+        const c = costing.find((x) => (x.order_id || x.id) === r.id) || {};
+        return money(c.total_cost);
+      } },
       { label: 'الربح', num: true, render: (r) => {
-        const p = Number(r.expected_revenue) - Number(r.total_cost);
+        const c = costing.find((x) => (x.order_id || x.id) === r.id) || {};
+        const p = Number(c.actual_revenue || 0) - Number(c.total_cost || 0);
         return `<b style="color:${p >= 0 ? 'var(--good)' : 'var(--bad)'}">${money(p)}</b>`;
       } },
-    ], costing, 'مفيش بيانات')}`;
+    ], closed, 'مفيش أمر اتقفل في الفترة دي')}`;
+
+  $('#anPeriod').onchange = (e) => {
+    window.__anPeriod = e.target.value;
+    window.__anFrom = null;
+    window.__anTo = null;
+    pageAnalytics();
+  };
+  $('#anFrom').onchange = (e) => { window.__anFrom = e.target.value; pageAnalytics(); };
+  $('#anTo').onchange = (e) => { window.__anTo = e.target.value; pageAnalytics(); };
 }
 
 /* ============================================================================
@@ -2762,127 +3842,339 @@ async function pageAnalytics() {
 const REPORTS = [
   ['worker', 'إنتاج الصنايعية'],
   ['stage', 'الإنتاج حسب المرحلة'],
+  ['stage_reject', 'العيوب حسب المرحلة'],
+  ['worker_reject', 'العيوب حسب الصنايعي'],
   ['fabric', 'استهلاك القماش'],
   ['orders', 'أوامر التشغيل'],
   ['cost', 'التكلفة والربحية'],
-  ['expenses', 'المصروفات'],
-  ['cash', 'حركة الخزنة والبنوك'],
+  ['customer_collect', 'تحصيلات العملاء'],
   ['customer', 'أرصدة العملاء'],
-  ['bundle', 'الشنط المفتوحة'],
-  ['reject', 'أسباب الرفض'],
-  ['delivery', 'أذون التسليم'],
-  ['audit', 'سجل التعديلات'],
+  ['expenses', 'المصروفات'],
+  ['cash_in', 'القبض'],
+  ['cash', 'حركة الخزنة والبنوك'],
 ];
 
-async function pageReports() {
-  const sel = window.__report || 'worker';
-  app.innerHTML = `
-    <h1>التقارير</h1>
-    <div class="card">
-      <label class="label">اختار التقرير</label>
-      <select id="rSel">${REPORTS.map(([k, l]) =>
-        `<option value="${k}"${k === sel ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
-    </div>
-    <div id="rBody"><div class="empty">بيحمّل…</div></div>`;
-  $('#rSel').onchange = (e) => { window.__report = e.target.value; pageReports(); };
-  renderReport(sel);
+/* الفترات الجاهزة. الأسبوع بيبدأ السبت، زي ما المصنع بيشتغل هنا. */
+const PERIODS = [
+  ['today', 'النهارده'],
+  ['yesterday', 'مبارح'],
+  ['this_week', 'الأسبوع ده'],
+  ['last_week', 'الأسبوع اللي فات'],
+  ['this_month', 'الشهر ده'],
+  ['last_month', 'الشهر اللي فات'],
+  ['this_year', 'السنة دي'],
+];
+
+function periodRange(key) {
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const shift = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+  if (key === 'today') return [iso(today), iso(today)];
+  if (key === 'yesterday') { const y = shift(today, -1); return [iso(y), iso(y)]; }
+  if (key === 'this_week') {
+    const start = shift(today, -((today.getDay() + 1) % 7));
+    return [iso(start), iso(today)];
+  }
+  if (key === 'last_week') {
+    const start = shift(today, -((today.getDay() + 1) % 7) - 7);
+    return [iso(start), iso(shift(start, 6))];
+  }
+  if (key === 'this_month') {
+    return [iso(new Date(today.getFullYear(), today.getMonth(), 1)), iso(today)];
+  }
+  if (key === 'last_month') {
+    const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const last = new Date(today.getFullYear(), today.getMonth(), 0);
+    return [iso(first), iso(last)];
+  }
+  return [iso(new Date(today.getFullYear(), 0, 1)), iso(today)];
 }
 
-async function renderReport(key) {
+const inRange = (d, from, to) => {
+  if (!d) return false;
+  const day = String(d).slice(0, 10);
+  return day >= from && day <= to;
+};
+
+async function pageReports() {
+  loading();
+  const period = window.__repPeriod || 'this_month';
+  const [defFrom, defTo] = periodRange(period);
+  const from = window.__repFrom || defFrom;
+  const to = window.__repTo || defTo;
+  const sel = window.__report || 'worker';
+
+  app.innerHTML = `
+    ${pageHead('التقارير', '',
+      `<button class="btn btn-ghost" id="repXls">${btnIcon('file', 'تصدير Excel')}</button>
+       <button class="btn btn-ghost" id="repPrint">${btnIcon('printer', 'طباعة')}</button>`)}
+
+    <div class="card" style="padding:12px;margin-bottom:14px">
+      <div class="hint" style="margin-bottom:8px">اختار التقرير</div>
+      <div class="chips" style="margin-bottom:12px">${REPORTS.map(([k, l]) =>
+        `<button class="chip ${k === sel ? 'chip-done' : 'chip-open'}" data-rep="${k}">${esc(l)}</button>`).join('')}</div>
+      <div class="grid g3">
+        <div><label class="label" for="repSel">التقرير</label>
+          <select class="input" id="repSel">${REPORTS.map(([k, l]) =>
+            `<option value="${k}"${k === sel ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+        <div><label class="label" for="repPeriod">الفترة</label>
+          <div class="chips" style="margin-bottom:6px">${PERIODS.map(([k, l]) =>
+            `<button class="chip ${k === period ? 'chip-done' : 'chip-open'}" data-per="${k}">${esc(l)}</button>`).join('')}</div>
+          <select class="input" id="repPeriod">${PERIODS.map(([k, l]) =>
+            `<option value="${k}"${k === period ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label class="label" for="repFrom">من</label>
+            <input class="input" id="repFrom" type="date" value="${esc(from)}"></div>
+          <div><label class="label" for="repTo">إلى</label>
+            <input class="input" id="repTo" type="date" value="${esc(to)}"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rBody"><div class="empty">بيحمّل…</div></div>`;
+
+  $('#repSel').onchange = (e) => { window.__report = e.target.value; pageReports(); };
+  document.querySelectorAll('[data-rep]').forEach((b) => {
+    b.onclick = () => { window.__report = b.dataset.rep; pageReports(); };
+  });
+  document.querySelectorAll('[data-per]').forEach((b) => {
+    b.onclick = () => {
+      window.__repPeriod = b.dataset.per;
+      window.__repFrom = null;
+      window.__repTo = null;
+      pageReports();
+    };
+  });
+  $('#repPeriod').onchange = (e) => {
+    window.__repPeriod = e.target.value;
+    window.__repFrom = null;
+    window.__repTo = null;
+    pageReports();
+  };
+  $('#repFrom').onchange = (e) => { window.__repFrom = e.target.value; pageReports(); };
+  $('#repTo').onchange = (e) => { window.__repTo = e.target.value; pageReports(); };
+  $('#repPrint').onclick = () => window.print();
+  $('#repXls').onclick = () => exportTableCsv();
+
+  renderReport(sel, from, to);
+}
+
+/* التصدير بياخد الجدول المعروض زي ما هو، فمهما كان التقرير المختار بيطلع صح. */
+function exportTableCsv() {
+  const table = document.querySelector('#rBody table');
+  if (!table) { notify('مفيش جدول للتصدير'); return; }
+
+  const lines = [...table.querySelectorAll('tr')].map((tr) =>
+    [...tr.querySelectorAll('th,td')].map((cell) => {
+      const t = cell.innerText.replace(/\s+/g, ' ').trim().replace(/"/g, '""');
+      return `"${t}"`;
+    }).join(','));
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `تقرير-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function renderReport(key, from, to) {
   const body = $('#rBody');
+  if (!body) return;
   body.innerHTML = '<div class="empty">بيحمّل…</div>';
+  const title = (REPORTS.find(([k]) => k === key) || [, key])[1];
+  const head = `<h2>${esc(title)}</h2>
+    <p class="hint">من ${dateAr(from)} لحد ${dateAr(to)}</p>`;
+
   try {
     if (key === 'worker') {
-      body.innerHTML = tbl([
-        { label: 'الكود', key: 'code' }, { label: 'الصنايعي', key: 'name' },
-        { label: 'مقبول', num: true, render: (r) => num(r.accepted_total) },
-        { label: 'مرفوض', num: true, render: (r) => num(r.rejected_total) },
-        { label: 'الأجر', num: true, render: (r) => money(r.earned_total) },
-        { label: 'المتبقي', num: true, render: (r) => money(r.remaining_due) },
-      ], await view('workers'), 'مفيش بيانات');
+      const [workers, assigns] = await Promise.all([view('workers'), table('work_assignments')]);
+      const agg = {};
+      assigns.filter((a) => a.received_at && inRange(a.received_at, from, to)).forEach((a) => {
+        const w = workers.find((x) => x.id === a.employee_id);
+        if (!w) return;
+        agg[w.id] = agg[w.id] || { code: w.code, name: w.name, acc: 0, rej: 0, redo: 0, wage: 0 };
+        agg[w.id].acc += Number(a.accepted_qty || 0);
+        agg[w.id].rej += Number(a.rejected_qty || 0);
+        agg[w.id].wage += Number(a.wage_amount || 0);
+      });
+      const rows = Object.values(agg);
+      const tot = rows.reduce((s, r) => ({
+        acc: s.acc + r.acc, rej: s.rej + r.rej, redo: s.redo + r.redo, wage: s.wage + r.wage,
+      }), { acc: 0, rej: 0, redo: 0, wage: 0 });
+      body.innerHTML = head + tbl([
+        { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+        { label: 'الصنايعي', key: 'name' },
+        { label: 'مقبول', num: true, render: (r) => num(r.acc) },
+        { label: 'مرفوض', num: true, render: (r) => num(r.rej) },
+        { label: 'إعادة', num: true, render: (r) => num(r.redo) },
+        { label: 'الأجر', num: true, render: (r) => money(r.wage) },
+      ], rows, 'مفيش إنتاج في الفترة دي', null, [
+        ['الإجمالي', '', num(tot.acc), num(tot.rej), num(tot.redo), money(tot.wage)],
+      ]);
     } else if (key === 'stage') {
-      const rows = await view('order_stages');
+      const rows = (await view('order_stages'))
+        .filter((r) => inRange(r.due_date || r.created_at, from, to));
       const agg = {};
       rows.forEach((r) => {
-        agg[r.code] = agg[r.code] || { name_ar: r.name_ar, acc: 0, rej: 0, fly: 0 };
-        agg[r.code].acc += Number(r.accepted_qty);
-        agg[r.code].rej += Number(r.rejected_qty);
-        agg[r.code].fly += Number(r.in_flight_qty);
+        agg[r.stage_code] = agg[r.stage_code] || { code: r.stage_code, acc: 0, rej: 0, fly: 0 };
+        agg[r.stage_code].acc += Number(r.accepted_qty || 0);
+        agg[r.stage_code].rej += Number(r.rejected_qty || 0);
+        agg[r.stage_code].fly += Number(r.in_flight_qty || 0);
       });
-      body.innerHTML = tbl([
-        { label: 'المرحلة', key: 'name_ar' },
+      const list = Object.values(agg).map((r) => ({ ...r, name: stageAr(r.code) }));
+      body.innerHTML = head + tbl([
+        { label: 'المرحلة', key: 'name' },
         { label: 'مقبول', num: true, render: (r) => num(r.acc) },
         { label: 'شغال', num: true, render: (r) => num(r.fly) },
         { label: 'مرفوض', num: true, render: (r) => num(r.rej) },
-      ], Object.values(agg), 'مفيش بيانات');
+      ], list, 'مفيش بيانات في الفترة دي');
+    } else if (key === 'stage_reject') {
+      const rows = (await table('work_assignments'))
+        .filter((a) => Number(a.rejected_qty) > 0 && inRange(a.received_at, from, to));
+      const agg = {};
+      rows.forEach((a) => {
+        agg[a.stage_code] = agg[a.stage_code] || { code: a.stage_code, rej: 0 };
+        agg[a.stage_code].rej += Number(a.rejected_qty);
+      });
+      const list = Object.values(agg).map((r) => ({ ...r, name: stageAr(r.code) }));
+      body.innerHTML = head + tbl([
+        { label: 'المرحلة', key: 'name' },
+        { label: 'المرفوض', num: true, render: (r) => num(r.rej) },
+      ], list, 'مفيش عيوب في الفترة دي');
+    } else if (key === 'worker_reject') {
+      const [workers, assigns] = await Promise.all([view('workers'), table('work_assignments')]);
+      const agg = {};
+      assigns.filter((a) => Number(a.rejected_qty) > 0 && inRange(a.received_at, from, to))
+        .forEach((a) => {
+          const w = workers.find((x) => x.id === a.employee_id);
+          if (!w) return;
+          agg[w.id] = agg[w.id] || { code: w.code, name: w.name, rej: 0 };
+          agg[w.id].rej += Number(a.rejected_qty);
+        });
+      body.innerHTML = head + tbl([
+        { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+        { label: 'الصنايعي', key: 'name' },
+        { label: 'المرفوض', num: true, render: (r) => num(r.rej) },
+      ], Object.values(agg), 'مفيش عيوب في الفترة دي');
     } else if (key === 'fabric') {
-      body.innerHTML = tbl([
-        { label: 'العميل', key: 'customer_name' }, { label: 'اللون', key: 'colour' },
-        { label: 'الرصيد', num: true, render: (r) => num(r.balance) + ' متر' },
-      ], await view('fabric'), 'مفيش بيانات');
+      const [fabric, moves] = await Promise.all([
+        view('fabric'), table('customer_fabric_movements'),
+      ]);
+      const used = {};
+      moves.filter((m) => m.movement === 'cut' && inRange(m.txn_date, from, to)).forEach((m) => {
+        const k = `${m.customer_id}|${m.colour}`;
+        used[k] = (used[k] || 0) + Math.abs(Number(m.quantity || 0));
+      });
+      const list = fabric.map((f) => ({
+        customer_name: f.customer_name, colour: f.colour, balance: f.balance,
+        used: used[`${f.customer_id}|${f.colour}`] || 0,
+      }));
+      body.innerHTML = head + tbl([
+        { label: 'العميل', key: 'customer_name' },
+        { label: 'اللون', key: 'colour' },
+        { label: 'المستهلك', num: true, render: (r) => num(r.used) + 'م' },
+        { label: 'الرصيد', num: true, render: (r) => num(r.balance) + 'م' },
+      ], list, 'مفيش بيانات');
     } else if (key === 'orders') {
-      body.innerHTML = tbl([
-        { label: 'الأمر', key: 'code' }, { label: 'العميل', key: 'customer_name' },
+      const rows = (await view('orders')).filter((o) => inRange(o.order_date, from, to));
+      body.innerHTML = head + tbl([
+        { label: 'الأمر', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+        { label: 'العميل', key: 'customer_name' },
+        { label: 'الموديل', key: 'model_name' },
         { label: 'الكمية', num: true, render: (r) => num(r.quantity) },
         { label: 'اتقص', num: true, render: (r) => num(r.cut_quantity) },
         { label: 'الحالة', render: (r) => chip(r.status) },
-      ], await view('orders'), 'مفيش بيانات');
+      ], rows, 'مفيش أوامر في الفترة دي');
     } else if (key === 'cost') {
-      body.innerHTML = tbl([
+      const [costing, orders] = await Promise.all([view('costing'), view('orders')]);
+      const rows = costing
+        .map((c) => ({ ...c, order_date: orders.find((o) => o.id === (c.order_id || c.id))?.order_date }))
+        .filter((c) => inRange(c.order_date, from, to));
+      body.innerHTML = head + tbl([
         { label: 'الأمر', key: 'code' },
-        { label: 'الإيراد', num: true, render: (r) => money(r.expected_revenue) },
+        { label: 'الإيراد المتوقع', num: true, render: (r) => money(r.expected_revenue) },
+        { label: 'الإيراد الفعلي', num: true, render: (r) => money(r.actual_revenue) },
         { label: 'التكلفة', num: true, render: (r) => money(r.total_cost) },
         { label: 'الربح', num: true, render: (r) =>
-          money(Number(r.expected_revenue) - Number(r.total_cost)) },
-      ], await view('costing'), 'مفيش بيانات');
-    } else if (key === 'expenses') {
-      body.innerHTML = tbl([
-        { label: 'التاريخ', render: (r) => dateAr(r.expense_date) },
-        { label: 'التصنيف', render: (r) => esc(txnCategoryAr(r.category)) },
-        { label: 'الوصف', key: 'description' },
-        { label: 'المبلغ', num: true, render: (r) => money(r.amount) },
-      ], await table('expenses'), 'مفيش بيانات');
-    } else if (key === 'cash') {
-      body.innerHTML = tbl([
+          money(Number(r.actual_revenue || 0) - Number(r.total_cost || 0)) },
+      ], rows, 'مفيش بيانات في الفترة دي');
+    } else if (key === 'customer_collect') {
+      const [txns, customers] = await Promise.all([
+        table('financial_transactions'), view('customers'),
+      ]);
+      const rows = txns
+        .filter((t) => t.category === 'customer_receipt' && inRange(t.txn_date, from, to))
+        .map((t) => ({ ...t, customer_name: customers.find((c) => c.id === t.customer_id)?.name || '—' }));
+      const tot = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+      body.innerHTML = head + tbl([
         { label: 'التاريخ', render: (r) => dateAr(r.txn_date) },
-        { label: 'البيان', key: 'description' },
+        { label: 'العميل', key: 'customer_name' },
+        { label: 'البيان', render: (r) => esc(r.description || '—') },
         { label: 'المبلغ', num: true, render: (r) => money(r.amount) },
-      ], await table('financial_transactions'), 'مفيش بيانات');
+      ], rows, 'مفيش تحصيلات في الفترة دي', null, [['الإجمالي', '', '', money(tot)]]);
     } else if (key === 'customer') {
-      body.innerHTML = tbl([
-        { label: 'الكود', key: 'code' }, { label: 'العميل', key: 'name' },
-        { label: 'أوامر', num: true, render: (r) => num(r.order_count) },
-        { label: 'مفتوحة', num: true, render: (r) => num(r.open_order_count) },
-      ], await view('customers'), 'مفيش بيانات');
-    } else if (key === 'bundle') {
-      const b = (await view('bundles')).filter((x) => x.status !== 'cancelled' && x.current_stage);
-      body.innerHTML = tbl([
-        { label: 'الشنطة', key: 'code' }, { label: 'الأمر', key: 'order_code' },
-        { label: 'المقاس', key: 'size' }, { label: 'اللون', render: (r) => esc(colourAr(r.colour_label)) },
-        { label: 'العدد', num: true, render: (r) => num(r.quantity) },
-        { label: 'عند', render: (r) => esc(r.current_holder || '—') },
-        { label: 'المرحلة', render: (r) => esc(r.current_stage || '—') },
-      ], b, 'مفيش شنط شغالة');
-    } else if (key === 'reject') {
-      const a = (await table('work_assignments')).filter((x) => Number(x.rejected_qty) > 0);
-      body.innerHTML = tbl([
-        { label: 'التاريخ', render: (r) => dateAr(r.received_at) },
-        { label: 'المرحلة', render: (r) => esc(stageAr(r.stage_code)) },
-        { label: 'مرفوض', num: true, render: (r) => num(r.rejected_qty) },
-        { label: 'السبب', render: (r) => esc(r.reject_reason || '—'), wrap: true },
-      ], a, 'مفيش رفض مسجل');
-    } else if (key === 'delivery') {
-      body.innerHTML = tbl([
-        { label: 'الإذن', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
-        { label: 'التاريخ', render: (r) => dateAr(r.delivered_on) },
-        { label: 'ملاحظات', render: (r) => esc(r.notes || '—') },
-      ], await table('deliveries'), 'مفيش أذون');
-    } else {
-      body.innerHTML = tbl([
-        { label: 'الوقت', render: (r) => esc(String(r.created_at).replace('T', ' ').slice(0, 19)) },
-        { label: 'الجدول', render: (r) => `<span class="mono hint">${esc(r.table_name)}</span>` },
-        { label: 'العملية', render: (r) => esc(r.action) },
-      ], await table('audit_log'), 'مفيش سجل');
+      /* الرصيد = قيمة المسلَّم (بعد المرتجعات) ناقص التحصيلات. بيُحسب من
+         الحركات والأوامر نفسها، مفيش رصيد متخزّن. */
+      const [customers, orders, costing, cash] = await Promise.all([
+        view('customers'), view('orders'), view('costing'),
+        table('financial_transactions'),
+      ]);
+      const costByOrder = Object.fromEntries(costing.map((c) => [c.order_id, c]));
+      const rows = customers.map((c) => {
+        const mine = orders.filter((o) => o.customer_id === c.id);
+        const received = mine.reduce((s, o) => s + Number((costByOrder[o.id] || {}).actual_revenue || 0), 0);
+        const paid = cash
+          .filter((t) => t.customer_id === c.id && t.category === 'customer_payment'
+            && inRange(t.txn_date, from, to))
+          .reduce((s, t) => s + Number(t.amount || 0), 0);
+        return { ...c, received, paid, balance: received - paid };
+      }).filter((r) => r.received || r.paid);
+      const tot = rows.reduce((s, r) => s + r.balance, 0);
+      body.innerHTML = head + tbl([
+        { label: 'الكود', render: (r) => `<span class="mono">${esc(r.code)}</span>` },
+        { label: 'العميل', key: 'name' },
+        { label: 'المستحق', num: true, render: (r) => money(r.received) },
+        { label: 'المحصّل', num: true, render: (r) => money(r.paid) },
+        { label: 'الرصيد', num: true, render: (r) => money(r.balance) },
+      ], rows, 'مفيش أرصدة في الفترة دي', null, [['الإجمالي', '', '', '', money(tot)]]);
+    } else if (key === 'expenses') {
+      const rows = (await table('expenses')).filter((e) => inRange(e.expense_date, from, to));
+      const tot = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+      body.innerHTML = head + tbl([
+        { label: 'التاريخ', render: (r) => dateAr(r.expense_date) },
+        { label: 'التصنيف', render: (r) => esc(r.category || '—') },
+        { label: 'الوصف', render: (r) => esc(r.description || '—') },
+        { label: 'المبلغ', num: true, render: (r) => money(r.amount) },
+      ], rows, 'مفيش مصروفات في الفترة دي', null, [['الإجمالي', '', '', money(tot)]]);
+    } else if (key === 'cash_in') {
+      const rows = (await table('financial_transactions'))
+        .filter((t) => Number(t.amount) > 0 && inRange(t.txn_date, from, to));
+      const tot = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+      body.innerHTML = head + tbl([
+        { label: 'التاريخ', render: (r) => dateAr(r.txn_date) },
+        { label: 'التصنيف', render: (r) => esc(txnCategoryAr(r.category)) },
+        { label: 'البيان', render: (r) => esc(r.description || '—') },
+        { label: 'المبلغ', num: true, render: (r) => money(r.amount) },
+      ], rows, 'مفيش قبض في الفترة دي', null, [['الإجمالي', '', '', money(tot)]]);
+    } else if (key === 'cash') {
+      const rows = (await table('financial_transactions'))
+        .filter((t) => inRange(t.txn_date, from, to));
+      const inn = rows.filter((r) => Number(r.amount) > 0)
+        .reduce((s, r) => s + Number(r.amount), 0);
+      const out = rows.filter((r) => Number(r.amount) < 0)
+        .reduce((s, r) => s + Math.abs(Number(r.amount)), 0);
+      body.innerHTML = head + tbl([
+        { label: 'التاريخ', render: (r) => dateAr(r.txn_date) },
+        { label: 'التصنيف', render: (r) => esc(txnCategoryAr(r.category)) },
+        { label: 'البيان', render: (r) => esc(r.description || '—') },
+        { label: 'داخل', num: true, render: (r) =>
+          (Number(r.amount) > 0 ? money(r.amount) : '—') },
+        { label: 'خارج', num: true, render: (r) =>
+          (Number(r.amount) < 0 ? money(Math.abs(r.amount)) : '—') },
+      ], rows, 'مفيش حركة في الفترة دي', null,
+      [['الإجمالي', '', '', money(inn), money(out)]]);
     }
   } catch (e) { body.innerHTML = `<div class="err">${esc(humanError(e))}</div>`; }
 }
@@ -2903,8 +4195,7 @@ async function pageUsers() {
 
   app.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-      <div><h1 style="margin:0">المستخدمون والصلاحيات</h1>
-        <p class="sub" style="margin:4px 0 0">${num(users.length)} حساب دخول</p></div>
+      <div><h1 style="margin:0">المستخدمون والصلاحيات</h1></div>
       <button class="btn btn-primary" id="newUser">+ مستخدم جديد</button>
     </div>
     <p class="hint" style="margin-top:10px">
@@ -2915,8 +4206,12 @@ async function pageUsers() {
       ${tbl([
         { label: 'المستخدم', render: (r) => `<b>${esc(r.username)}</b>
             <div class="hint" style="margin:0">${esc(r.display_name || '')}</div>` },
-        { label: 'الدور', render: (r) => (r.roles || []).map((k) =>
-            `<span class="chip">${esc(roleName[k] || k)}</span>`).join(' ') || '—' },
+        /* المدير الأعلى مش محتاج صف في user_roles — دوره هو is_superuser. */
+        { label: 'الدور', render: (r) => {
+          if (r.is_superuser) return '<span class="chip chip-done">مدير النظام</span>';
+          return (r.roles || []).map((k) =>
+            `<span class="chip">${esc(roleName[k] || k)}</span>`).join(' ') || '—';
+        } },
         { label: 'مرتبط بـ', render: (r) => r.employee_name
             ? `<span class="mono hint">${esc(r.employee_code || '')}</span> ${esc(r.employee_name)}` : '—' },
         { label: 'الصلاحيات', num: true, render: (r) => num((r.effective_perms || []).length) },
@@ -2947,7 +4242,7 @@ async function newUser(roles) {
   ]);
   if (!v || !v.username) return;
   if (!v.password || v.password.length < 8) {
-    alert('كلمة السر لازم ٨ حروف على الأقل'); return;
+    notify('كلمة السر لازم ٨ حروف على الأقل'); return;
   }
 
   const picked = await pickRoles(roles, []);
@@ -2962,7 +4257,7 @@ async function newUser(roles) {
       display_name: v.display || v.username, roles: picked,
     });
     pageUsers();
-  } catch (e) { alert(humanError(e)); }
+  } catch (e) { notifyErr(humanError(e)); }
 }
 
 async function editUser(u, roles) {
@@ -2990,7 +4285,7 @@ async function editUser(u, roles) {
       await rpc('rpc_update_profile', { p_id: u.id, p_is_active: state.active === '1' });
     }
     pageUsers();
-  } catch (e) { alert(humanError(e)); }
+  } catch (e) { notifyErr(humanError(e)); }
 }
 
 // A checkbox per role; the caller gets the chosen keys or null when cancelled.
@@ -3020,7 +4315,7 @@ function pickRoles(roles, current) {
     form.onsubmit = (e) => {
       e.preventDefault();
       const picked = [...form.querySelectorAll('input:checked')].map((i) => i.value);
-      if (!picked.length) { alert(ERRORS.E_ROLE_REQUIRED); return; }
+      if (!picked.length) { notifyErr(ERRORS.E_ROLE_REQUIRED); return; }
       close(picked);
     };
     mask.querySelector('[data-cancel]').onclick = () => close(null);
@@ -3033,7 +4328,7 @@ function pickRoles(roles, current) {
 // writes an explicit deny, so the row differs from the template in either direction.
 async function editPermissions(u, roles) {
   if (!u) return;
-  if (u.id === PROFILE?.id) { alert(ERRORS.E_CANNOT_EDIT_OWN_PERMS); return; }
+  if (u.id === PROFILE?.id) { notifyErr(ERRORS.E_CANNOT_EDIT_OWN_PERMS); return; }
 
   const fromRole = new Set();
   (u.roles || []).forEach((k) => {
@@ -3091,7 +4386,7 @@ async function editPermissions(u, roles) {
       await rpc('rpc_set_user_permissions', { p_id: u.id, p_overrides: diff });
       mask.remove();
       pageUsers();
-    } catch (err) { alert(humanError(err)); }
+    } catch (err) { notifyErr(humanError(err)); }
   };
   mask.querySelector('[data-cancel]').onclick = () => mask.remove();
   mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
@@ -3101,46 +4396,236 @@ async function editPermissions(u, roles) {
 /* ============================================================================
    استيراد البيانات
    ========================================================================== */
+/* أقسام الاستيراد: كل قسم ليه أعمدته ومفتاحه ووظيفة التحويل لمعاملات الـ RPC. */
+const IMPORT_SECTIONS = [
+  {
+    key: 'customers',
+    title: 'العملاء',
+    hint: 'الاسم لازم. حرف التشغيل لو سبته فاضي بيتحدد تلقائي. العميل اللي اسمه أو تليفونه موجود بيتعدّى.',
+    cols: ['الاسم', 'التليفون', 'العنوان', 'حرف التشغيل', 'ملاحظات'],
+    required: [0],
+    sample: 'محمود الجندي,01011550189,القاهرة,M,عميل قديم\nعبد الرحمن الجمل,01000000001,الجيزة,,',
+    load: async () => {
+      const rows = await view('customers');
+      return {
+        existing: rows,
+        isDup: (c, all) => all.some((r) =>
+          (r.name || '').trim() === c[0].trim()
+          || (c[1] && (r.phone || '').trim() === c[1].trim())),
+        rpc: 'rpc_create_customer',
+        args: (c) => ({ p_name: c[0], p_phone: c[1] || null, p_letter: c[3] || null }),
+      };
+    },
+  },
+  {
+    key: 'employees',
+    title: 'الموظفين والصنايعية',
+    hint: 'الاسم والتليفون لازم. الموظف اللي تليفونه موجود بيتعدّى. صورة البطاقة بتترفع بعدين من ملف كل موظف.',
+    cols: ['الاسم', 'التليفون', 'تليفون تاني', 'الوظيفة', 'القسم', 'تاريخ التعيين', 'ملاحظات'],
+    required: [0, 1],
+    sample: 'محمد محمود,01011550189,,خياط,الإنتاج,2025-01-15,\nسيد الخياط,01000000002,,لياقات,الإنتاج,,',
+    load: async () => {
+      const rows = await view('workers');
+      return {
+        existing: rows,
+        isDup: (c, all) => all.some((r) => (r.phone || '').trim() === c[1].trim()),
+        rpc: 'rpc_create_employee',
+        args: (c) => ({
+          p_name: c[0], p_kind: 'worker', p_phone: c[1] || null,
+          p_job_title: c[3] || null, p_hired_on: c[5] || null,
+        }),
+      };
+    },
+  },
+  {
+    key: 'fabric',
+    title: 'أرصدة القماش الافتتاحية',
+    hint: 'سطر لكل لون عند كل عميل. العميل بالكود (CUS0001) أو بالاسم زي ما هو متسجّل. سطور نفس العميل ونفس التاريخ بتتسجّل استلام واحد. العميل اللي اتسجّل له رصيد افتتاحي قبل كده بيتعدّى.',
+    cols: ['العميل', 'اللون', 'الأمتار', 'التاريخ'],
+    required: [0, 1, 2],
+    sample: 'CUS0001,إسود,120,2026-01-01\nمحمود الجندي,كحلي,80,2026-01-01',
+    load: async () => {
+      const [customers, fabric] = await Promise.all([
+        view('customers'), view('fabric'),
+      ]);
+      return {
+        existing: fabric,
+        isDup: (c, all, custId) => all.some((r) =>
+          r.customer_id === custId && (r.colour || '').trim() === c[1].trim()),
+        resolve: (c) => {
+          const raw = c[0].trim();
+          const byCode = customers.find((x) => (x.code || '').toUpperCase() === raw.toUpperCase());
+          const byName = customers.find((x) => (x.name || '').trim() === raw);
+          return (byCode || byName || {}).id || null;
+        },
+        rpc: 'rpc_receive_fabric',
+        args: (c, ctx) => ({
+          p_customer: ctx.custId, p_colour: c[1],
+          p_quantity: Number(c[2]), p_date: c[3] || null,
+          p_notes: 'رصيد افتتاحي',
+        }),
+      };
+    },
+  },
+  {
+    key: 'opening_cash',
+    title: 'رصيد الخزنة والبنوك الافتتاحي',
+    hint: 'سطر لكل حساب، بالاسم زي ما هو في صفحة الخزنة والحسابات. بيتسجّل حركة إيداع وصفها «رصيد افتتاحي». الحساب لازم يكون معمول الأول، والحساب اللي له رصيد افتتاحي قبل كده بيتعدّى.',
+    cols: ['الحساب', 'المبلغ', 'التاريخ'],
+    required: [0, 1],
+    sample: 'الخزنة الرئيسية,50000,2026-01-01\nالبنك الأهلي,120000,2026-01-01',
+    load: async () => {
+      const [accounts, txns] = await Promise.all([
+        view('accounts'), table('financial_transactions'),
+      ]);
+      return {
+        existing: txns,
+        isDup: (c, all, acctId) => all.some((r) =>
+          r.account_id === acctId && (r.description || '').includes('رصيد افتتاحي')),
+        resolve: (c) => {
+          const raw = c[0].trim();
+          return (accounts.find((a) => (a.name || '').trim() === raw)
+            || accounts.find((a) => (a.code || '').toUpperCase() === raw.toUpperCase())
+            || {}).id || null;
+        },
+        rpc: 'rpc_post_cash',
+        args: (c, ctx) => ({
+          p_account: ctx.custId, p_amount: Number(c[1]),
+          p_category: 'capital', p_description: 'رصيد افتتاحي',
+          p_date: c[2] || null,
+        }),
+      };
+    },
+  },
+];
+
+/* CSV بسيط: بيحترم علامات التنصيص والفواصل جوه النص. */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i += 1; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (ch !== '\r') cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows
+    .map((r) => r.map((c) => c.trim()))
+    .filter((r) => r.some((c) => c !== ''));
+}
+
 async function pageImport() {
+  const state = window.__importState || {};
+  const sections = await Promise.all(IMPORT_SECTIONS.map(async (s) => {
+    try { return { ...s, ctx: await s.load() }; }
+    catch (e) { return { ...s, ctx: { error: humanError(e) } }; }
+  }));
+
   app.innerHTML = `
-    <h1>استيراد البيانات</h1>
-    <p class="sub">من ملف Excel أو CSV — عميل واحد أو صف واحد في المرة</p>
-    <div class="card">
-      <h2 style="margin-top:0">عملاء</h2>
-      <p class="hint">الأعمدة: الاسم، التليفون، حرف التشغيل. أي صف ناقص بيترفض لوحده.</p>
-      <textarea id="csvCust" class="input" rows="5" style="font-family:ui-monospace,monospace"
-        placeholder="محمود الجندي,01011550189,M&#10;عبد الرحمن الجمل,01000000001,AG"></textarea>
-      <div style="margin-top:10px"><button class="btn btn-primary" id="impCust">استيراد العملاء</button></div>
-      <div id="impCustOut" style="margin-top:10px"></div>
-    </div>
+    ${pageHead('استيراد البيانات',
+      'احفظ شيت Excel بصيغة CSV UTF-8 (ملف ← حفظ باسم) وارفعه. كل سطر بيتراجع قبل ما يتسجّل حاجة، واللي موجود قبل كده بيتعدّى.')}
 
-    <div class="card">
-      <h2 style="margin-top:0">صنايعية</h2>
-      <p class="hint">الأعمدة: الاسم، التعريش، التليفون.</p>
-      <textarea id="csvEmp" class="input" rows="5" style="font-family:ui-monospace,monospace"
-        placeholder="محمد محمود,تعريش,01011550189"></textarea>
-      <div style="margin-top:10px"><button class="btn btn-primary" id="impEmp">استيراد الصنايعية</button></div>
-      <div id="impEmpOut" style="margin-top:10px"></div>
-    </div>`;
+    ${sections.map((s) => `<div class="card">
+      <h2 style="margin-top:0">${esc(s.title)}</h2>
+      <p class="hint">${esc(s.hint)}</p>
+      <div class="toolbar" style="margin-bottom:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" data-tpl="${s.key}">تحميل النموذج</button>
+          <label class="btn btn-primary btn-sm" style="cursor:pointer">
+            اختار ملف CSV
+            <input type="file" accept=".csv,text/csv" data-file="${s.key}" hidden>
+          </label>
+        </div>
+      </div>
+      <p class="hint" style="margin:0">الأعمدة: ${s.cols.map((c, i) =>
+        s.required.includes(i) ? `${esc(c)} (لازم)` : esc(c)).join('، ')}</p>
+      <div id="imp-${s.key}" style="margin-top:10px"></div>
+    </div>`).join('')}`;
 
-  const runImport = async (raw, fn, mapper, outEl) => {
-    const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (!lines.length) { outEl.innerHTML = '<div class="err">مفيش صفوف</div>'; return; }
-    let ok = 0; const errs = [];
-    for (const line of lines) {
-      const cells = line.split(',').map((c) => c.trim());
-      try { await rpc(fn, mapper(cells)); ok++; }
-      catch (e) { errs.push(`${line} → ${humanError(e)}`); }
-    }
-    outEl.innerHTML = `<div class="ok">اتضاف ${num(ok)} من ${num(lines.length)}</div>
-      ${errs.length ? `<div class="err" style="margin-top:8px">${errs.map(esc).join('<br>')}</div>` : ''}`;
-  };
+  /* تحميل النموذج: بنكتب CSV بترميز BOM عشان Excel يقرأ العربي صح. */
+  app.querySelectorAll('[data-tpl]').forEach((b) => {
+    b.onclick = () => {
+      const s = sections.find((x) => x.key === b.dataset.tpl);
+      const csv = `${s.cols.join(',')}\n${s.sample}\n`;
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `نموذج-${s.title}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+  });
 
-  $('#impCust').onclick = () => runImport($('#csvCust').value, 'rpc_create_customer',
-    (c) => ({ p_name: c[0], p_phone: c[1] || null, p_letter: c[2] || null }), $('#impCustOut'));
-  $('#impEmp').onclick = () => runImport($('#csvEmp').value, 'rpc_create_employee',
-    (c) => ({ p_name: c[0], p_kind: 'worker', p_job_title: c[1] || null, p_phone: c[2] || null }),
-    $('#impEmpOut'));
+  app.querySelectorAll('[data-file]').forEach((input) => {
+    input.onchange = async () => {
+      const s = sections.find((x) => x.key === input.dataset.file);
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const rows = parseCsv(text.replace(/^\ufeff/, ''));
+      /* أول صف عناوين لو مش أرقام — بنشيله عشان البيانات بس هي اللي تتسجل. */
+      const body = rows.length && !/^\d/.test(rows[0][2] || '')
+        && rows[0].some((c) => s.cols.some((col) => col.includes(c) || c.includes(col)))
+        ? rows.slice(1) : rows;
+      renderPreview(s, body, $(`#imp-${s.key}`));
+    };
+  });
+
+  function renderPreview(s, rows, box) {
+    if (s.ctx.error) { box.innerHTML = `<div class="err">${esc(s.ctx.error)}</div>`; return; }
+    if (!rows.length) { box.innerHTML = '<div class="err">الملف فاضي</div>'; return; }
+
+    const checked = rows.map((c) => {
+      const missing = s.required.filter((i) => !(c[i] || '').trim());
+      if (missing.length) return { c, ok: false, why: 'ناقص: ' + missing.map((i) => s.cols[i]).join('، ') };
+      let custId = null;
+      if (s.ctx.resolve) {
+        custId = s.ctx.resolve(c);
+        if (!custId) return { c, ok: false, why: 'مش موجود في النظام' };
+      }
+      if (s.ctx.isDup(c, s.ctx.existing, custId)) return { c, ok: false, why: 'موجود قبل كده — هيتعدّى' };
+      return { c, ok: true, custId };
+    });
+
+    const good = checked.filter((r) => r.ok).length;
+    box.innerHTML = `
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>#</th>${s.cols.map((c) => `<th>${esc(c)}</th>`).join('')}<th>الحالة</th></tr></thead>
+        <tbody>${checked.map((r, i) => `<tr>
+          <td class="num">${num(i + 1)}</td>
+          ${s.cols.map((_, j) => `<td>${esc(r.c[j] || '')}</td>`).join('')}
+          <td>${r.ok ? '<span class="chip chip-done">هيتسجّل</span>'
+            : `<span class="chip chip-idle">${esc(r.why)}</span>`}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" id="impGo-${s.key}" ${good ? '' : 'disabled'}>
+          استيراد ${num(good)} سطر</button>
+        <span class="hint">${num(good)} جاهز · ${num(checked.length - good)} هيتعدّى</span>
+      </div>`;
+
+    const goBtn = $(`#impGo-${s.key}`);
+    if (!goBtn) return;
+    goBtn.onclick = async () => {
+      goBtn.disabled = true;
+      let ok = 0; const errs = [];
+      for (const r of checked.filter((x) => x.ok)) {
+        try {
+          await rpc(s.ctx.rpc, s.ctx.args(r.c, { custId: r.custId }));
+          ok += 1;
+        } catch (e) { errs.push(`${r.c[0]} → ${humanError(e)}`); }
+      }
+      box.innerHTML = `<div class="ok">اتسجل ${num(ok)} سطر</div>
+        ${errs.length ? `<div class="err" style="margin-top:8px">${errs.map(esc).join('<br>')}</div>` : ''}`;
+      notify(`اتسجل ${ok} سطر`);
+    };
+  }
 }
 
 /* ============================================================================
@@ -3148,16 +4633,101 @@ async function pageImport() {
    ========================================================================== */
 async function pageAudit() {
   loading();
-  const rows = await table('audit_log');
+  const perPage = 50;
+  const st = window.__audit || (window.__audit = {
+    from: '', to: '', table: '', actor: '', q: '', shown: perPage,
+  });
+  const [logs, users] = await Promise.all([table('audit_log'), view('users')]);
+
+  const userName = (id) => {
+    const u = users.find((x) => x.id === id);
+    return u ? (u.display_name || u.username) : 'النظام';
+  };
+
+  const ACTION_AR = { insert: 'إضافة', update: 'تعديل', delete: 'مسح' };
+  const ACTION_CHIP = { insert: 'chip-done', update: 'chip-open', delete: 'chip-bad' };
+
+  const tables = [...new Set(logs.map((l) => l.table_name))].sort();
+  const filtered = logs
+    .filter((l) => !st.table || l.table_name === st.table)
+    .filter((l) => !st.actor || l.actor_id === st.actor)
+    .filter((l) => {
+      const d = String(l.created_at).slice(0, 10);
+      return (!st.from || d >= st.from) && (!st.to || d <= st.to);
+    })
+    .filter((l) => !st.q || [l.table_name, tableAr(l.table_name), userName(l.actor_id),
+      l.action, ACTION_AR[l.action]].join(' ').toLowerCase()
+      .includes(st.q.toLowerCase()))
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
+  const page = filtered.slice(0, st.shown);
+
+  /* الـ diff بيرجع {new: {...}} أو {old, new}. بنلخّصه في سطر واحد مقروء. */
+  const diffLine = (l) => {
+    const d = l.diff || {};
+    if (l.action === 'update' && d.new && d.old) {
+      const changed = Object.keys(d.new).filter((k) =>
+        JSON.stringify(d.new[k]) !== JSON.stringify(d.old[k]));
+      return changed.length ? 'تغيير: ' + changed.slice(0, 4).join('، ') : '';
+    }
+    return '';
+  };
+
   app.innerHTML = `
-    <h1>سجل التعديلات</h1>
-    <p class="sub">كل تغيير على الجداول الأساسية بيتسجل تلقائي</p>
-    ${tbl([
-      { label: 'الوقت', render: (r) => esc(String(r.created_at).replace('T', ' ').slice(0, 19)) },
-      { label: 'الجدول', render: (r) => `<span class="mono hint">${esc(r.table_name)}</span>` },
-      { label: 'العملية', render: (r) => `<span class="chip chip-idle">${esc(r.action)}</span>` },
-      { label: 'السجل', render: (r) => `<span class="mono hint">${esc(String(r.row_pk || '').slice(0, 8))}</span>` },
-    ], rows, 'مفيش تعديلات مسجلة')}`;
+    ${pageHead('سجل التعديلات', 'مين عمل إيه وإمتى — الأسعار والأجور بتبان بس للي معاه صلاحيتها')}
+
+    <div class="card" style="padding:12px;margin-bottom:14px">
+      <div class="hint" style="margin-bottom:8px">فلترة</div>
+      <div class="grid g3">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label class="label" for="aFrom">من</label>
+            <input class="input" id="aFrom" type="date" value="${esc(st.from)}"></div>
+          <div><label class="label" for="aTo">لحد</label>
+            <input class="input" id="aTo" type="date" value="${esc(st.to)}"></div>
+        </div>
+        <div><label class="label" for="aTable">النوع</label>
+          <select class="input" id="aTable">
+            <option value="">الكل</option>
+            ${tables.map((t) => `<option value="${esc(t)}"${t === st.table ? ' selected' : ''}>${esc(tableAr(t))}</option>`).join('')}
+          </select></div>
+        <div><label class="label" for="aActor">المستخدم</label>
+          <select class="input" id="aActor">
+            <option value="">الكل</option>
+            ${users.map((u) => `<option value="${esc(u.id)}"${u.id === st.actor ? ' selected' : ''}>${esc(u.display_name || u.username)}</option>`).join('')}
+          </select></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input class="input" id="aQ" placeholder="بحث" value="${esc(st.q)}" style="flex:1">
+        <button class="btn btn-primary" id="aGo">بحث</button>
+      </div>
+    </div>
+
+    <h2>الحركات</h2>
+    ${page.length ? `<div class="card" style="padding:0">
+      ${page.map((l) => `
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-bottom:1px solid var(--line)">
+          <div style="min-width:130px" class="hint mono">${esc(tsAr(l.created_at))}</div>
+          <div style="min-width:64px"><span class="chip ${ACTION_CHIP[l.action] || 'chip-idle'}">${esc(ACTION_AR[l.action] || l.action)}</span></div>
+          <div style="flex:1">
+            <div>${esc(tableAr(l.table_name))}</div>
+            ${diffLine(l) ? `<div class="hint">— ${esc(diffLine(l))}</div>` : ''}
+          </div>
+          <div class="hint">${esc(userName(l.actor_id))}</div>
+        </div>`).join('')}
+    </div>` : `<div class="empty">مفيش حركات مطابقة</div>`}
+    ${filtered.length > page.length
+      ? `<div style="text-align:center;margin-top:12px">
+           <button class="btn btn-ghost" id="aMore">اعرض أكتر (${filtered.length - page.length})</button>
+         </div>` : ''}`;
+
+  const apply = () => { pageAudit(); };
+  $('#aFrom').onchange = (e) => { st.from = e.target.value; apply(); };
+  $('#aTo').onchange = (e) => { st.to = e.target.value; apply(); };
+  $('#aTable').onchange = (e) => { st.table = e.target.value; st.shown = perPage; apply(); };
+  $('#aActor').onchange = (e) => { st.actor = e.target.value; st.shown = perPage; apply(); };
+  $('#aGo').onclick = () => { st.q = $('#aQ').value.trim(); st.shown = perPage; apply(); };
+  $('#aQ').onkeydown = (e) => { if (e.key === 'Enter') $('#aGo').click(); };
+  if ($('#aMore')) $('#aMore').onclick = () => { st.shown += perPage; apply(); };
 }
 
 /* ============================================================================
@@ -3173,12 +4743,12 @@ function pageHelp() {
       <b>أندرويد (كروم)</b>
       <p class="hint">افتح الموقع وسجّل دخولك، وبعدين من قايمة المتصفح ⋮ اضغط «تثبيت التطبيق».</p>
       <b>آيفون (سفاري)</b>
-      <p class="hint">اضغط زرار المشاركة ⬆ واختار «إضافة إلى الشاشة الرئيسية».</p>
+      <p class="hint">اضغط زرار المشاركة واختار «إضافة إلى الشاشة الرئيسية».</p>
     </div>
 
     <h2>رئيس العمال — مسح الباركود</h2>
     <div class="card">
-      <p class="hint">افتح «رئيس العمال» واضغط «📷 مسح بالكاميرا»، ووجّه الكاميرا على ليبل الشنطة.
+      <p class="hint">افتح «رئيس العمال» واضغط «مسح بالكاميرا»، ووجّه الكاميرا على ليبل الشنطة.
         لو المتصفح ما بيدعمش القراءة، اكتب الكود في الخانة (مثال: <b class="mono">BND0001</b>).
         ينفع كمان تمسح باركود قطعة (<b class="mono">MM0001</b>) والسيستم بيطلّع الشنطة بتاعتها.</p>
     </div>
@@ -3195,8 +4765,8 @@ function pageHelp() {
 
     <h2>الطباعة و PDF</h2>
     <div class="card">
-      <p class="hint">من تفاصيل الأمر: «طباعة الأمر»، ومن الشنط: «🏷 ليبل» بيطبع ليبلات بالباركود.
-        من صفحة العميل: «🖨 فاتورة PDF». من صفحة الصنايعي: «🖨 كشف حساب PDF».
+      <p class="hint">من تفاصيل الأمر: «طباعة الأمر»، ومن الشنط: «ليبل» بيطبع ليبلات بالباركود.
+        من صفحة العميل: «فاتورة PDF». من صفحة الصنايعي: «كشف حساب PDF».
         في نافذة الطباعة اختار «حفظ كـ PDF».</p>
     </div>
 
@@ -3214,7 +4784,8 @@ const ROUTES = {
   home: pageHome, foreman: pageForeman, orders: pageOrders, 'order-new': pageOrderNew,
   templates: pageTemplates, warehouse: pageWarehouse, customers: pageCustomers,
   workers: pageWorkers, accounts: pageAccounts, expenses: pageExpenses,
-  supplies: pageSupplies, machines: pageMachines, analytics: pageAnalytics,
+  supplies: pageSupplies, 'supplies-admin': pageSuppliesAdmin,
+  machines: pageMachines, analytics: pageAnalytics,
   reports: pageReports, users: pageUsers, import: pageImport, audit: pageAudit,
   help: pageHelp,
 };
@@ -3224,7 +4795,7 @@ const NAV_KEYS = new Set(NAV.flatMap((g) => g.items.map((i) => i.key)));
 function route() {
   stopScan();
   const hash = (location.hash || '#home').slice(1);
-  const [key, param] = hash.split('/');
+  const [key, param, sub] = hash.split('/');
 
   let navKey = key;
   if (key === 'order' || key === 'order-new' || key === 'templates') navKey = 'orders';
@@ -3236,15 +4807,29 @@ function route() {
   $('#scrim').classList.remove('on');
 
   let run = ROUTES[key];
-  if (key === 'order' && param) run = () => pageOrder(param);
+  if (key === 'order' && param) run = () => pageOrder(param, sub);
   if (key === 'customer' && param) run = () => pageCustomer(param);
   if (key === 'worker' && param) run = () => pageWorker(param);
+  if (key === 'reports' && param) window.__report = param;
 
   if (!run) { app.innerHTML = '<div class="err">الصفحة مش موجودة</div>'; return; }
   Promise.resolve().then(run).catch(fail);
 }
 
 window.addEventListener('hashchange', route);
+
+/* الأخطاء اللي بتحصل جوه مستمعي الأحداث (زي onclick) مش بتمر على الراوتر،
+   فبتفضل صامتة والمستخدم بيشوف زرار مش بيعمل حاجة. هنا بنحوّلها لتنبيه. */
+window.addEventListener('unhandledrejection', (ev) => {
+  ev.preventDefault();
+  notifyErr(humanError(ev.reason));
+});
+window.addEventListener('error', (ev) => {
+  if (ev.target && ev.target !== window) return;   // أخطاء تحميل الصور مش بتاعتنا
+  const e = ev.error;
+  const known = e && e.message && ERRORS[String(e.message).split('|')[0]];
+  notifyErr(known ? humanError(e) : 'حصل خطأ غير متوقع. حدّث الصفحة وحاول تاني');
+});
 
 $('#menuBtn').onclick = () => {
   $('#sidebar').classList.add('open');

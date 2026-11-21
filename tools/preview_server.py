@@ -54,7 +54,7 @@ VIEWS = {
 # Plain tables the UI may read (whitelisted, never free-form SQL).
 TABLES = {
     "operational_codes", "work_assignments", "deliveries", "delivery_lines",
-    "customer_returns", "customer_fabric_movements", "stage_templates",
+    "customer_returns", "customer_fabric_movements", "cut_lines", "stage_templates",
     "stage_template_stages", "items", "warehouses", "inventory_transactions",
     "machines", "machine_maintenance", "audit_log", "expenses",
     "financial_transactions", "employees", "employee_pay_terms", "profiles",

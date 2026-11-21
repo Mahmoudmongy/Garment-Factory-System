@@ -3,7 +3,7 @@
 ## Garment Factory (CMT, Egypt) — `/workspace/project`
 Arabic RTL PWA cloning a deployed reference app. No build step: vanilla JS in
 `preview/`, served by `tools/preview_server.py` (`/api/rpc` → one `public.rpc_*`).
-DB: PostgreSQL 15 via `supabase/migrations/` (0001 → 0013).
+DB: PostgreSQL 15 via `supabase/migrations/` (0001 → 0018).
 
 **Run/verify**
 - DB tests: `./tools/run_db_tests_local.sh` — add `--keep` or the `gfspg`
@@ -12,8 +12,14 @@ DB: PostgreSQL 15 via `supabase/migrations/` (0001 → 0013).
 - Static: `python3 tools/static_sql_check.py`
 - Syntax: `node --check preview/app.js`
 
-**Shape (verify, don't assume)**: 32 tables, 11 views, 31 `rpc_*`, 13 migrations,
-133/133 pgTAP assertions.
+**Shape (verify, don't assume)**: 32 tables, 5 `v_*` views in migrations,
+41 `rpc_*`, 18 migrations. Live DB was 14 migrations applied on 2026-11-21 —
+0015–0018 are written but NOT applied there.
+
+**Deploy gap**: `SUPABASE_DB_URL` and `CLOUDFLARE_API_TOKEN` are not in the
+sandbox, and `db.<ref>.supabase.co` does not resolve from it, so migrations
+must be applied from the dev machine or CI. `tools/apply_migrations.py` is the
+tool (`--status`, `--dry-run`); it needs `psycopg`.
 
 **Invariants**
 - Balances are never stored; views aggregate ledger rows.
