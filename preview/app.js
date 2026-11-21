@@ -337,6 +337,8 @@ const go = (h) => { location.hash = h; };
 
 /* نموذج تعديل بسيط: بيرجّع قيم الحقول أو null لو المستخدم قفل.
    الحقول: {key, label, value, type?} */
+/* الحقول اللي عليها required لازم تتكتب. التحقق في المتصفح بيرفض الإرسال
+   ويوريك رسالة عربية بدل ما تبعت قيمة فاضية للسرفر وترجع بخطأ مش مفهوم. */
 function formDialog(title, fields) {
   return new Promise((resolve) => {
     const mask = document.createElement('div');
@@ -345,8 +347,15 @@ function formDialog(title, fields) {
       <h3>${esc(title)}</h3>
       ${fields.map((f) => `<div class="field">
         <label class="label" for="fd-${esc(f.key)}">${esc(f.label)}</label>
-        <input class="input" id="fd-${esc(f.key)}" name="${esc(f.key)}"
-          type="${esc(f.type || 'text')}" value="${esc(f.value ?? '')}">
+        ${f.options ? `<select class="input" id="fd-${esc(f.key)}" name="${esc(f.key)}">
+          ${f.options.map((o) => `<option value="${esc(o.value)}"
+            ${String(o.value) === String(f.value ?? '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select>` : `<input class="input" id="fd-${esc(f.key)}" name="${esc(f.key)}"
+          type="${esc(f.type || 'text')}" value="${esc(f.value ?? '')}"
+          ${f.min !== undefined ? `min="${esc(String(f.min))}"` : ''}
+          ${f.step !== undefined ? `step="${esc(String(f.step))}"` : ''}
+          ${f.required ? 'required' : ''}>`}
+        ${f.hint ? `<div class="hint">${esc(f.hint)}</div>` : ''}
       </div>`).join('')}
       <div class="acts">
         <button type="submit" class="btn btn-primary">حفظ</button>
@@ -370,6 +379,21 @@ function formDialog(title, fields) {
     form.elements[fields[0].key].focus();
   });
 }
+
+/* رسالة المتصفح الافتراضية إنجليزي ("Please fill out this field").
+   بقت عربية عشان الشاشة كلها عربي. */
+document.addEventListener('invalid', (e) => {
+  const el = e.target;
+  if (!el || !el.validity) return;
+  if (el.validity.valueMissing) el.setCustomValidity('اكتب القيمة هنا');
+  else if (el.validity.rangeUnderflow) el.setCustomValidity(`أقل قيمة مسموحة ${el.min}`);
+  else if (el.validity.badInput) el.setCustomValidity('اكتب رقم صحيح');
+  else el.setCustomValidity('');
+}, true);
+
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.setCustomValidity) e.target.setCustomValidity('');
+}, true);
 
 /* ============================================================================
    الباركود — Code128B بحساب التحقق، مرسوم SVG
@@ -1201,9 +1225,12 @@ async function pageOrder(id) {
 
   const cb = $('#cancelBtn');
   if (cb) cb.onclick = async () => {
-    const why = prompt('سبب الإلغاء');
-    if (!why) return;
-    try { await rpc('rpc_cancel_production_order', { p_id: o.id, p_reason: why }); pageOrder(id); }
+    const v = await formDialog('إلغاء أمر التشغيل', [
+      { key: 'why', label: 'سبب الإلغاء', required: true,
+        hint: 'السبب بيتسجل في سجل التعديلات — اكتب حاجة تفرّق بيها الأمر بعدين' },
+    ]);
+    if (!v || !v.why) return;
+    try { await rpc('rpc_cancel_production_order', { p_id: o.id, p_reason: v.why }); pageOrder(id); }
     catch (e) { alert(humanError(e)); }
   };
 
@@ -2023,12 +2050,18 @@ async function pageWorkers() {
     btn.onclick = async () => {
       const due = Number(btn.dataset.due);
       if (due <= 0) { alert('مفيش مستحقات'); return; }
-      const amt = prompt(`مبلغ الصرف لـ ${btn.dataset.name}`, String(due));
-      if (!amt) return;
+      const v = await formDialog(`صرف أجر — ${btn.dataset.name}`, [
+        { key: 'amt', label: 'المبلغ (ج.م)', type: 'number', value: String(due),
+          min: '0.01', step: '0.01', required: true,
+          hint: `المستحق ${money(due)} — تقدر تصرف أقل، والمتبقي بيفضل على الحساب` },
+      ]);
+      if (!v) return;
+      const amt = Number(v.amt);
+      if (!Number.isFinite(amt) || amt <= 0) { alert('اكتب مبلغ أكبر من صفر'); return; }
       try {
         const cash = (META.accounts || [])[0];
         await rpc('rpc_post_cash', {
-          p_account: cash.id, p_amount: -Math.abs(Number(amt)),
+          p_account: cash.id, p_amount: -Math.abs(amt),
           p_category: 'worker_payment', p_description: 'صرف أجر ' + btn.dataset.name,
           p_employee: btn.dataset.pay,
         });
@@ -2271,9 +2304,12 @@ async function pageAccounts() {
 
   app.querySelectorAll('[data-rev]').forEach((b) => {
     b.onclick = async () => {
-      const why = prompt('سبب العكس');
-      if (!why) return;
-      try { await rpc('rpc_reverse_cash', { p_id: b.dataset.rev, p_reason: why }); pageAccounts(); }
+      const v = await formDialog('عكس الحركة', [
+        { key: 'why', label: 'سبب العكس', required: true,
+          hint: 'العكس مش بيمسح الحركة الأصلية — بيسجل حركة معاكسة، والسبب بيفضل موثّق' },
+      ]);
+      if (!v || !v.why) return;
+      try { await rpc('rpc_reverse_cash', { p_id: b.dataset.rev, p_reason: v.why }); pageAccounts(); }
       catch (e) { alert(humanError(e)); }
     };
   });
@@ -2942,13 +2978,16 @@ async function editUser(u, roles) {
     await rpc('rpc_update_profile', { p_id: u.id, p_display: v.display || null });
     await rpc('rpc_set_user_roles', { p_id: u.id, p_roles: picked });
 
-    const toggled = await formDialog('حالة الحساب', [
-      { key: 'active', label: 'شغّال؟ (اكتب 1 للإيقاف، أو سيبها فاضية يفضل زي ما هو)', value: '' },
+    const state = await formDialog('حالة الحساب', [
+      { key: 'active', label: 'الحساب', value: u.is_active === false ? '0' : '1',
+        options: [
+          { value: '1', label: 'شغّال — يقدر يدخل النظام' },
+          { value: '0', label: 'موقوف — ممنوع من الدخول' },
+        ],
+        hint: 'الإيقاف بيمنع الدخول فورًا، لكنه مش بيمسح بيانات المستخدم ولا حركاته' },
     ]);
-    if (toggled && toggled.active === '1') {
-      await rpc('rpc_update_profile', { p_id: u.id, p_is_active: false });
-    } else if (toggled && toggled.active === '0') {
-      await rpc('rpc_update_profile', { p_id: u.id, p_is_active: true });
+    if (state) {
+      await rpc('rpc_update_profile', { p_id: u.id, p_is_active: state.active === '1' });
     }
     pageUsers();
   } catch (e) { alert(humanError(e)); }
@@ -2974,6 +3013,8 @@ function pickRoles(roles, current) {
       </div>
     </form>`;
     document.body.appendChild(mask);
+    mask.tabIndex = -1;
+    mask.focus();
     const form = mask.querySelector('form');
     const close = (val) => { mask.remove(); resolve(val); };
     form.onsubmit = (e) => {
@@ -2984,6 +3025,7 @@ function pickRoles(roles, current) {
     };
     mask.querySelector('[data-cancel]').onclick = () => close(null);
     mask.onclick = (e) => { if (e.target === mask) close(null); };
+    mask.onkeydown = (e) => { if (e.key === 'Escape') close(null); };
   });
 }
 
@@ -3032,6 +3074,8 @@ async function editPermissions(u, roles) {
     </div>
   </form>`;
   document.body.appendChild(mask);
+  mask.tabIndex = -1;
+  mask.focus();
 
   const form = mask.querySelector('form');
   form.onsubmit = async (e) => {
@@ -3051,6 +3095,7 @@ async function editPermissions(u, roles) {
   };
   mask.querySelector('[data-cancel]').onclick = () => mask.remove();
   mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
+  mask.onkeydown = (e) => { if (e.key === 'Escape') mask.remove(); };
 }
 
 /* ============================================================================
