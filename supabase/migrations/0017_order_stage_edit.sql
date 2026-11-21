@@ -4,7 +4,7 @@
 -- والمراحل بتتنسخ من القالب. الدالة دي بتحدّث النسخة المنسوخة على الأمر.
 -- ============================================================================
 
-insert into public.permissions (code, group_ar, label_ar, sort_order)
+insert into public.permissions (code, group_ar, name_ar, sort_order)
 values ('production.order.stage.edit', 'أوامر التشغيل', 'تعديل مراحل الأمر', 43)
 on conflict (code) do nothing;
 

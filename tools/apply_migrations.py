@@ -17,6 +17,7 @@ import hashlib
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 try:
     import psycopg
@@ -47,20 +48,25 @@ create table if not exists public.schema_migrations (
 
 def candidate_urls():
     """Every connection string worth trying, most likely first."""
-    explicit = os.environ.get("SUPABASE_DB_URL")
-    if explicit:
+    explicit = (os.environ.get("SUPABASE_DB_URL") or "").strip()
+    if explicit.startswith(("postgres://", "postgresql://")):
         yield explicit
+    elif explicit:
+        print("ignoring SUPABASE_DB_URL: it is not a postgres:// connection string")
 
-    password = os.environ.get("SUPABASE_DB_PASSWORD")
+    password = (os.environ.get("SUPABASE_DB_PASSWORD") or "").strip()
     if not password:
         return
 
+    # Passwords routinely contain @ : / ? # which break URL parsing unless
+    # percent-encoded; a raw "@" silently moves the host boundary.
+    pw = quote(password, safe="")
     ref = os.environ.get("SUPABASE_PROJECT_REF", PROJECT_REF)
-    yield f"postgresql://postgres:{password}@db.{ref}.supabase.co:5432/postgres"
+    yield f"postgresql://postgres:{pw}@db.{ref}.supabase.co:5432/postgres"
     for region in POOLER_REGIONS:
         for prefix in ("aws-0", "aws-1"):
             yield (
-                f"postgresql://postgres.{ref}:{password}"
+                f"postgresql://postgres.{ref}:{pw}"
                 f"@{prefix}-{region}.pooler.supabase.com:5432/postgres"
             )
 
@@ -74,7 +80,7 @@ def connect():
 
     errors = []
     for url in candidate_urls():
-        host = url.split("@")[-1].split("/")[0]
+        host = url.rsplit("@", 1)[-1].split("/")[0]
         try:
             conn = psycopg.connect(url, connect_timeout=8, autocommit=False)
             print(f"connected via {host}")
