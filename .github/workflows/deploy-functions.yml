@@ -52,4 +52,5 @@ jobs:
         run: |
           supabase functions deploy admin-create-user \
             --project-ref "${{ vars.SUPABASE_PROJECT_REF || 'xfttxitgwqvqztssbxra' }}" \
-            --use-api
+            --use-api \
+            --yes
