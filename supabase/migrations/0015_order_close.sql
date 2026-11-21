@@ -5,7 +5,7 @@
 --  فمش محتاجين views إضافية.)
 -- ============================================================================
 
-insert into public.permissions (code, group_ar, label_ar, sort_order)
+insert into public.permissions (code, group_ar, name_ar, sort_order)
 values ('production.order.close', 'أوامر التشغيل', 'إقفال أمر', 73)
 on conflict (code) do nothing;
 
