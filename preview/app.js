@@ -345,9 +345,11 @@ const warehouseKindAr = (k) => (k ? (WAREHOUSE_KINDS[k] || k) : '—');
 const RETURN_DISP = { rework: 'يتعاد تشغيله', scrap: 'يتعدم', stock: 'يرجع للمخزن' };
 const returnDispAr = (d) => (d ? (RETURN_DISP[d] || d) : '—');
 
+/* Must match items_category_check exactly — anything outside this set is
+   rejected by the database with 23514. */
 const ITEM_CATEGORIES = {
-  fabric: 'قماش', thread: 'خيوط', zipper: 'سحابات', button: 'أزرار',
-  packaging: 'تغليف', accessory: 'إكسسوار', other: 'أخرى',
+  fabric: 'قماش', thread: 'خيوط', button: 'أزرار', zipper: 'سحابات',
+  lining: 'بطانة', packaging: 'تغليف', spare_part: 'قطعة غيار', other: 'أخرى',
 };
 const itemCategoryAr = (c) => (c ? (ITEM_CATEGORIES[c] || c) : '—');
 
@@ -506,6 +508,8 @@ async function withBusy(btn, label, fn) {
     btn.innerHTML = original;
   }
 }
+
+const statusAr = (s) => (s ? (STATUS[s] || [null, s])[1] : '—');
 
 const chip = (s) => {
   const [cls, label] = STATUS[s] || ['chip-idle', s || '—'];
@@ -2396,7 +2400,7 @@ function printOrderDoc(o, stages, bundles) {
       <div><b>الكمية</b>${num(o.quantity)} قطعة</div>
       <div><b>سعر القطعة</b>${money(o.piece_price)}</div>
       <div><b>ميعاد التسليم</b>${dateAr(o.due_date)}</div>
-      <div><b>الحالة</b>${esc(o.status)}</div>
+      <div><b>الحالة</b>${esc(statusAr(o.status))}</div>
     </div>
     <table>
       <thead><tr><th>المرحلة</th><th>بتبدأ بعد</th><th class="num">سعر القطعة</th><th class="num">مقبول</th><th class="num">مرفوض</th></tr></thead>

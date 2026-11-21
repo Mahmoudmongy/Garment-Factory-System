@@ -37,7 +37,9 @@ jobs:
           npm run build
 
       - name: Check the built output
-        run: python3 tools/static_sql_check.py
+        run: |
+          python3 tools/static_sql_check.py
+          python3 tools/check_code_maps.py
 
       # A fork or a repo without the secrets still gets a green build; only the
       # publishing step is skipped, so the check results stay trustworthy.
