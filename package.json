@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build": "node tools/build-static.js",
     "start": "node server.js",
     "dev": "node server.js",
     "test:db": "bash tools/run_db_tests_local.sh",

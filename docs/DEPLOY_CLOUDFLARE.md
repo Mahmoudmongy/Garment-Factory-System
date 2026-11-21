@@ -28,12 +28,23 @@ RLS بالكامل.
 | الحقل | القيمة |
 |---|---|
 | Framework preset | **None** |
-| Build command | اتركه **فاضي** |
-| Build output directory | `preview` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
 
 5. **Save and Deploy**.
 
-مفيش build، فالنشر بيخلص في ثواني.
+الـ build مجرد نسخ: `tools/build-static.js` بينقل `preview/` لـ `dist/`،
+وبيفشل لو أي ملف أساسي ناقص. مفيش تحويل ولا تحزيم، فبيخلص في أقل من ثانية.
+
+## لو ظهر خطأ `Failed: error occurred while running deploy command`
+
+السبب الأشهر: Cloudflare بيلاقي `package.json` فيشغّل `npm run build` تلقائياً،
+ولو الريبو مش فيه سكربت اسمه `build` بيفشل فوراً. السكربت موجود دلوقتي،
+والـ `package-lock.json` اتولّد من جديد لأنه كان لسه شايل تبعيات Next.js من
+نسخة قديمة من المشروع — تعارض بين `package.json` والـ lock بيوقّف `npm ci`.
+
+لو الخطأ فضل، شوف اللوج في **Deployments → آخر نشر → View build log**.
+أول سطر خطأ هو المهم، والباقي غالباً تبعات.
 
 ## النشر — الطريقة الثانية: من الطرفية
 
@@ -71,7 +82,8 @@ python3 tools/smoke_test.py https://<project>.pages.dev
 
 ## حاجات لسه ناقصة
 
-- **مفيش service worker.** الـ manifest موجود، فالتثبيت على الموبايل بيشتغل،
-  بس التطبيق مش بيشتغل offline. المرجع بيشتغل.
+- **الـ service worker بيغطي الواجهة بس.** التطبيق بيفتح offline، بس
+  البيانات لازم نت لأنها بتيجي من Supabase مباشرة. ده مقصود: عرض أرقام قديمة
+  للمستخدم في المصنع أخطر من رسالة "مفيش نت".
 - **`/healthz` مش بيفحص حاجة** على Cloudflare. لو عايز مراقبة حقيقية، استخدم
   Cloudflare Health Checks أو ping لـ Supabase REST مباشرة.
