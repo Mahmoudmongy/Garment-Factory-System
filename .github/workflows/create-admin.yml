@@ -1,0 +1,47 @@
+name: Create the first admin login
+
+# Runs tools/create_admin.py against the live project. Needs three secrets:
+#   SUPABASE_SERVICE_ROLE_KEY      creates the auth user through the Admin API
+#   DATABASE_PASSWORD              writes the profile row (no RLS insert policy)
+#   GARMENT_FACTORY_ADMIN_PASSWORD the password for the admin login
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'اسم المستخدم'
+        default: 'admin'
+      display:
+        description: 'الاسم المعروض'
+        default: 'المدير'
+
+concurrency:
+  group: create-admin
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install psycopg
+        run: pip install 'psycopg[binary]'
+
+      - name: Create the admin
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://xfttxitgwqvqztssbxra.supabase.co' }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          ADMIN_PASSWORD: ${{ secrets.GARMENT_FACTORY_ADMIN_PASSWORD }}
+        run: |
+          python3 tools/create_admin.py \
+            --username "${{ inputs.username }}" \
+            --display "${{ inputs.display }}"
