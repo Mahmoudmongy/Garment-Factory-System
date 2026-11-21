@@ -1457,10 +1457,6 @@ function renderTemplateEditor(tpl, stages, allTemplates) {
       };
     });
 
-    host.querySelectorAll('[data-flag]').forEach((cb) => {
-      cb.onchange = () => { rows[Number(cb.dataset.i)][cb.dataset.flag] = cb.checked; };
-    });
-
     host.querySelectorAll('[data-up]').forEach((b) => {
       b.onclick = () => {
         const i = Number(b.dataset.up);
@@ -1498,9 +1494,17 @@ const blankStage = () => ({
 });
 
 function stageCard(r, i, rows) {
-  /* الاعتماديات المتاحة: المراحل اللي قبلها وليها كود، غير المرحلة نفسها. */
-  const before = rows.slice(0, i).filter((x) => x.code && x.code.trim());
   const picked = Array.isArray(r.depends_on) ? r.depends_on : [];
+  /* الخيارات: المراحل اللي قبلها. ولو المرحلة كانت معتمدة على مرحلة تانية
+     واتحركت لفوق، بنفضل نعرضها — وإلا الاعتمادية تختفي من الشاشة وتفضل
+     متسجّلة من غير ما حد يشوفها أو يقدر يشيلها. */
+  const earlier = rows.slice(0, i).filter((x) => x.code && x.code.trim());
+  const earlierCodes = new Set(earlier.map((x) => x.code));
+  const orphans = picked
+    .filter((c) => !earlierCodes.has(c))
+    .map((c) => rows.find((x) => x.code === c))
+    .filter(Boolean);
+  const before = earlier.concat(orphans);
   const deps = before.length
     ? `<div class="grid g4" style="margin-top:10px;align-items:end">
          ${before.map((x) => `
@@ -1535,16 +1539,6 @@ function stageCard(r, i, rows) {
           value="${esc(r.piece_price ?? 0)}"></div>
     </div>
     ${deps}
-    <div class="grid g2" style="margin-top:10px">
-      <label class="label" style="display:flex;gap:6px;align-items:center;font-weight:400">
-        <input type="checkbox" data-flag="is_final" data-i="${i}" ${r.is_final ? 'checked' : ''}>
-        آخر مرحلة — بعدها البضاعة تبقى جاهزة للتسليم
-      </label>
-      <label class="label" style="display:flex;gap:6px;align-items:center;font-weight:400">
-        <input type="checkbox" data-flag="is_operations" data-i="${i}" ${r.is_operations ? 'checked' : ''}>
-        شغل بأجر يومي مش بالقطعة
-      </label>
-    </div>
   </div>`;
 }
 
