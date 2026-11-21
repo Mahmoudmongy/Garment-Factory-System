@@ -1,9 +1,8 @@
 name: Create the first admin login
 
-# Runs tools/create_admin.py against the live project. Needs three secrets:
+# Runs tools/create_admin.py against the live project. Needs two secrets:
 #   SUPABASE_SERVICE_ROLE_KEY      creates the auth user through the Admin API
-#   DATABASE_PASSWORD              writes the profile row (no RLS insert policy)
-#   GARMENT_FACTORY_ADMIN_PASSWORD the password for the admin login
+#   DATABASE_PASSWORD              the admin password, and the profile write
 
 on:
   workflow_dispatch:
@@ -40,7 +39,7 @@ jobs:
           SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://xfttxitgwqvqztssbxra.supabase.co' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_DB_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
-          ADMIN_PASSWORD: ${{ secrets.GARMENT_FACTORY_ADMIN_PASSWORD }}
+          ADMIN_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
         run: |
           python3 tools/create_admin.py \
             --username "${{ inputs.username }}" \
