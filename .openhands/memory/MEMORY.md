@@ -30,7 +30,19 @@ DB: PostgreSQL 15 via `supabase/migrations/` (0001 → 0013).
   migrations and the live DB over any prose doc; re-check before citing.
 - `tests/integration/` targets a dead API and has never run.
 
-**Biggest gap**: no user-administration RPC (create profile, assign role, set
-grant). The users screen is read-only.
+**User admin**: `0014_users_and_view_security.sql` supplies `rpc_create_profile`,
+`rpc_update_profile`, `rpc_set_user_roles`, `rpc_set_user_permissions` and
+`rpc_my_permissions`; the Auth user itself comes from the `admin-create-user`
+edge function (`supabase/functions/`), since only the service key can create one.
+So the users screen is NOT read-only anymore — earlier notes saying so are stale.
 
 See `2026-11-20.md` for detail and the traps that cost time.
+
+## Hard-won facts
+- Cloudflare deploy workflow must gate on the credential check, or every PR
+  fails: `wrangler` exits 1 when `CLOUDFLARE_API_TOKEN` is unset.
+- Dialog masks need `tabIndex = -1` + `focus()` for an Escape `keydown` listener
+  to fire; attaching the listener alone does nothing.
+- Platform reserves ports 12000/12001; test harnesses should use 12009+.
+- `gh` needs `GH_TOKEN=$GITHUB_TOKEN`; that token can push but has no Secrets scope.
+- PR #1 (draft) on branch `rebuild-full-ui` is the live review surface.
